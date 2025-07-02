@@ -22,6 +22,14 @@ function initializeBregmaDB(bregma_path) {
     }
 }
 
+function initializeProjectResults(results_path) {
+    if (File.exists(results_path)) {
+        headers = "ID,Filename,ROI,ROI Area(px^2),L-R,Bregma,Count";
+        File.saveString(headers, results_path);
+        print("Project Result database initialized: " + results_path);
+    }
+}
+
 function saveBregmaValue(bregma_path, filename, bregma_value) {
     if (File.exists(bregma_path)) {
         existing_content = File.openAsString(bregma_path);
@@ -234,6 +242,7 @@ macro "ROI Analysis Project Manager" {
 
     // Define paths for project
     bregma_path = project_dir + "bregma_values.csv";
+    results_path = project_dir + "results.csv";
     roi_dir = project_dir + "ROI_files" + File.separator;
     input_image_dir = project_dir + "Input_images" + File.separator;
     output_image_dir = project_dir + "Output_images" + File.separator;
@@ -242,11 +251,13 @@ macro "ROI Analysis Project Manager" {
     if (project_file_list.length == 0) {
         print("Setting up new project structure...");
         initializeBregmaDB(bregma_path);
+        initializeProjectResults(results_path);
         File.makeDirectory(roi_dir);
         File.makeDirectory(input_image_dir);
         File.makeDirectory(output_image_dir);
         print("Project directories created:");
         print("- Bregma DB: " + bregma_path);
+        print("- Results DB: " + results_path);
         print("- ROI Directory: " + roi_dir);
         print("- Input Images: " + input_image_dir);
         print("- Output Images: " + output_image_dir);
