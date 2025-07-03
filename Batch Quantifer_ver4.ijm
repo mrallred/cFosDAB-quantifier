@@ -4,6 +4,9 @@
 // Colors for ROI overlays
 colors = newArray("#FF0000", "#0000FF", "#00FF00", "#FFFF00", "#FF00FF", "#00FFFF","#B300FF","48FF00");
 
+// Initilize headers as global variable
+csv_header = "ID,File name,ROI,Area of ROI (px^2),Bregma,Count\n";
+
 // =============================================================================
 // FUNCTIONS
 // =============================================================================
@@ -74,25 +77,22 @@ function checkProjectSetup(project_dir, results_path, bregma_path, roi_dir, inpu
 
 function processorFindMaxima(original_ID, original_name, workflow) {
 	selectImage(original_ID);
-	output_name = getTitle() + "_FM_Output";
-	
-	// Prepare output image
-	run("Duplicate...", "title="+output_name);
-	selectImage(output_name);
-	output_ID = getImageID();
 	
 	// Prepare CSV string
 	csv = "";
 	
+	// csv headers for output
+	csv_header = "ID,File name,ROI,Area of ROI (px^2),Bregma,Count(FindMaxima)\n";
+
+	
 	// Split Channels
-	selectImage(original_ID);
 	run("Split Channels");
 	all_image_IDs = getImageIDs();
-	green_ID = all_image_IDs[2];
+	green_ID = all_image_IDs[1];
 	
 	// Close extra images
 	for (i = 0; i < all_image_IDs.length; i++) {
-    	if (all_image_IDs[i] != green_ID && all_image_IDs[i] != output_ID) { 
+    	if (all_image_IDs[i] != green_ID) { 
         	selectImage(all_image_IDs[i]);
         	close();
     	}
@@ -138,22 +138,19 @@ function processorFindMaxima(original_ID, original_name, workflow) {
 		animal_ID = file_name_parts[0];
 		
 	    // Add ROI overlay
-    	selectImage(output_ID);
     	roiManager("Select", i);
     	Overlay.addSelection;
 	 
 	    // Find maxima for point selection overlay
-	    selectImage(green_ID);
-	    roiManager("Select", i);
 	    run("Find Maxima...", "prominence=25 light output=[Point Selection]");
 	    
 	    // If points found (selection type 10), add them to overlay
 	    if (selectionType() == 10) {
 	    	getSelectionCoordinates(xpoints, ypoints);
-
-	    	// Switch to visualization image and add overlay points
-	    	selectImage(output_ID);
-	    	setForegroundColor(colors[i % colors.length]);
+			
+			// Add point overlays to image
+			run("RGB Color");
+	    	setForegroundColor(255,0,0);
 	    	for (j = 0; j < xpoints.length; j++) {
     			makeOval(xpoints[j]-1, ypoints[j]-1, 5, 5); 
     			run("Fill", "slice");
@@ -163,9 +160,11 @@ function processorFindMaxima(original_ID, original_name, workflow) {
 	    // Append to csv - make sure all variables are converted to strings
 		csv += toString(animal_ID) + "," + original_name + "," + ROI_label + "," + toString(ROI_area) + "," + toString(bregma) + "," + toString(count) + "\n";
 	}
+	// Show Overlays and burn into image
+	Overlay.show()
+	run("Flatten");
 	
 	// Return results of this processor as a csv string
-	print(csv);
 	return csv;
 }
 
@@ -188,7 +187,13 @@ function singleImageWorkflow(image_list) {
 	// Run processor
 	results = processorFindMaxima(original_ID, selected_image_name, "single");
 	final_csv = csv_header + results;
-	File.saveString(final_csv, project_dir+selected_image_name+"_processed.csv");
+	
+	// Save csv and overlay image
+	File.saveString(final_csv, project_dir+File.getNameWithoutExtension(selected_image_name)+"_processed.csv");
+	saveAs("Tiff", output_image_dir + File.getNameWithoutExtension(selected_image_name)+"_processed"); 
+	
+	// Close all
+	close("*");
 }
 
 
@@ -232,9 +237,6 @@ macro "Project Batch Processor" {
 	// Generate image file list and its length
 	image_list = Array.sort(getFileList(input_image_dir));
 	num_images = image_list.length;
-	
-	// Define csv headers for output
-	csv_header = "ID,File name,ROI,Area of ROI (px^2),Bregma,Count\n";
 
 	// Initialize main dialog/workflow selection
 	workflows = newArray("Process Single Image", "Process all images in project", "Quit Macro");
