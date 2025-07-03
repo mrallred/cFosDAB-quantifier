@@ -103,12 +103,12 @@ function processorFindMaxima(original_ID, original_name, workflow) {
 	roi_file_path = roi_dir + File.getNameWithoutExtension(original_name) + "_ROIs.zip";
 	if (File.exists(roi_file_path)) {
 		prepROILabels();
+		num_ROIs = roiManager("Count");
 		
 		if (workflow == "single") {
         	waitForUser("Proceed to process?");
         	
         	// Save ROIs in case they were changed
-        	num_ROIs = roiManager("Count");
         	if (num_ROIs > 0) {
    				roiManager("Save", roi_file_path);
 			}
@@ -182,20 +182,61 @@ function singleImageWorkflow(image_list) {
 	selected_image_path = input_image_dir + selected_image_name;
 	
 	open(selected_image_path);
-	original_ID = getImageID();
+	selected_ID = getImageID();
 	
 	// Run processor
-	results = processorFindMaxima(original_ID, selected_image_name, "single");
+	results = processorFindMaxima(selected_ID, selected_image_name, "single");
 	final_csv = csv_header + results;
 	
 	// Save csv and overlay image
 	File.saveString(final_csv, project_dir+File.getNameWithoutExtension(selected_image_name)+"_processed.csv");
-	saveAs("Tiff", output_image_dir + File.getNameWithoutExtension(selected_image_name)+"_processed"); 
+	saveAs("Tiff", output_image_dir + File.getNameWithoutExtension(selected_image_name)+"_single_processed"); 
 	
 	// Close all
 	close("*");
+	run("Clear Results");
+	roiManager("reset");
+	close("*");
+	close("Results");
+	close("ROI Manager");
 }
 
+function batchWorkflow(image_list) {
+	// Ensure images in list
+	if (image_list.length == 0) {
+		exit("No images found in input_images folder.");
+	}
+	
+	// initialize csv holder
+	batch_csv_str = csv_header;
+	
+	// go through all images in project input_image list
+	for (i=0; i < image_list.length; i++) {
+		// Extract paths and names for current image
+		selected_image_name = image_list[i];
+		selected_image_name_no_ext = File.getNameWithoutExtension(selected_image_name);
+		selected_image_path = input_image_dir + selected_image_name;
+		
+		open(selected_image_path);
+		selected_ID = getImageID();
+		
+		// Run Processor
+		results = processorFindMaxima(selected_ID, selected_image_name, "batch");
+		batch_csv_str += results;
+		
+		saveAs("Tiff", output_image_dir + selected_image_name_no_ext +"batch_processed");
+		
+		// Clean up windows
+		close("*");
+		run("Clear Results");
+		roiManager("reset");
+		close("*");
+		close("Results");
+		close("ROI Manager");
+	}
+	// Save aggregated csv to results.csv
+	File.saveString(batch_csv_str, results_path);
+}
 
 // =============================================================================
 // MAIN PROGRAM
@@ -218,7 +259,6 @@ macro "Project Batch Processor" {
     	}
 	}
 	// Valid directory found
-	print("Selected project directory: " + project_dir);
 	project_name = File.getName(project_dir);
 
 	// Define Paths for project
@@ -240,29 +280,31 @@ macro "Project Batch Processor" {
 
 	// Initialize main dialog/workflow selection
 	workflows = newArray("Process Single Image", "Process all images in project", "Quit Macro");
+	continue_loop = true;
 	
-	Dialog.create("Select Workflow");
-	Dialog.addMessage("Project " + project_name + " is loaded. ");
-	Dialog.addMessage("- Project path: " + project_dir);
-	Dialog.addMessage("- Number of images: " + num_images);
-	Dialog.addMessage("- First Image: " + image_list[0]); 
-	Dialog.addMessage("- Last Image: " + image_list[image_list.length-1]); 
-	Dialog.addChoice("\nSelect what you want to do: ", workflows);
-	Dialog.show();
-
-	action = Dialog.getChoice();
+	while (continue_loop){
+		Dialog.create("Select Workflow");
+		Dialog.addMessage("Project " + project_name + " is loaded. ");
+		Dialog.addMessage("- Project path: " + project_dir);
+		Dialog.addMessage("- Number of images: " + num_images);
+		Dialog.addMessage("- First Image: " + image_list[0]); 
+		Dialog.addMessage("- Last Image: " + image_list[image_list.length-1]); 
+		Dialog.addChoice("\nSelect what you want to do: ", workflows);
+		Dialog.show();
 	
-	if (action == "Process Single Image"){
-		singleImageWorkflow(image_list);
+		action = Dialog.getChoice();
+		
+		if (action == "Process Single Image"){
+			singleImageWorkflow(image_list);
+		}
+		else if (action == "Process all images in project"){
+			batchWorkflow(image_list);
+		}
+		else if (action == "Quit Macro"){
+			continue_loop = false;
+		}
 	}
-	else if (action == "Process all images in project"){
-		continue;
-	}
-	else if (action == "Quit Macro"){
-		continue;
-	}
-
-
+	exit("Finished Processing. Macro will close.");
 }
 
 
