@@ -23,7 +23,7 @@ function initializeBregmaDB(bregma_path) {
 }
 
 function initializeProjectResults(results_path) {
-    if (File.exists(results_path)) {
+    if (!File.exists(results_path)) {
         headers = "ID,Filename,ROI,ROI Area(px^2),L-R,Bregma,Count";
         File.saveString(headers, results_path);
         print("Project Result database initialized: " + results_path);
@@ -242,25 +242,27 @@ macro "ROI Analysis Project Manager" {
 
     // Define paths for project
     bregma_path = project_dir + "bregma_values.csv";
-    results_path = project_dir + "results.csv";
+    results_dir = project_dir + "Results" + File.separator;
+    results_path = results_dir + "results.csv";
     roi_dir = project_dir + "ROI_files" + File.separator;
     input_image_dir = project_dir + "Input_images" + File.separator;
     output_image_dir = project_dir + "Output_images" + File.separator;
+    temp_dir = project_dir + "temp" + File.separator;
+    ilastik_models_dir = project_dir + "Ilastik_models" + File.separator;
+
 
     // Set up project structure if new project (empty folder)
     if (project_file_list.length == 0) {
         print("Setting up new project structure...");
         initializeBregmaDB(bregma_path);
+        File.makeDirectory(results_dir);
         initializeProjectResults(results_path);
         File.makeDirectory(roi_dir);
         File.makeDirectory(input_image_dir);
         File.makeDirectory(output_image_dir);
-        print("Project directories created:");
-        print("- Bregma DB: " + bregma_path);
-        print("- Results DB: " + results_path);
-        print("- ROI Directory: " + roi_dir);
-        print("- Input Images: " + input_image_dir);
-        print("- Output Images: " + output_image_dir);
+        File.makeDirectory(temp_dir);
+        File.makeDirectory(ilastik_models_dir);
+        
     } else {
         print("Using existing project structure...");
     }
@@ -401,7 +403,7 @@ macro "ROI Analysis Project Manager" {
         }
     }
 
-    // Final cleanup and summary
+    // Final summary
     print("=== PROJECT PROCESSING COMPLETE ===");
     print("Project directory: " + project_dir);
     print("Check the following directories for results:");
@@ -417,4 +419,12 @@ macro "ROI Analysis Project Manager" {
                 "- ROI files (.zip)\n" +
                 "- Labeled output images\n" +
                 "- Bregma value database");
+
+    // Clean up windows
+	close("*");
+	run("Clear Results");
+	roiManager("reset");
+	close("*");
+	close("Results");
+	close("ROI Manager");
 }
