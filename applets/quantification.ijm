@@ -1,7 +1,8 @@
 // ImageJ Macro to batch process images through cell-quantifcation workflows. Optimized for cFos DAB stained tissue. 
 // Project directory must be set up properly before use. Use ROIProcessor Workflow to set up project and define the 
 // Regions of Interest, then run this macro to do the quantification.
-
+SUITE_AND_PROJECT_ARG = getArgument();
+print("succesfully entered quantification" +SUITE_AND_PROJECT_ARG);
 // Colors for ROI overlays
 colors = newArray("#FF0000", "#0000FF", "#00FF00", "#FFFF00", "#FF00FF", "#00FFFF","#B300FF","48FF00");
 
