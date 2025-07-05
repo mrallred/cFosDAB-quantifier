@@ -452,11 +452,18 @@ MAIN_SUITE_PATH = parts[6];
 //                  PROJECT ENTRY 
 // ============================================================
 
+// note for new projects
+if (type == "new"){
+    note = "The folder should be completely empty.";
+} else {
+    note = "";
+}
+
 // Prompt users to select project directory
 waitForUser("Select Your Project Directory", 
             "Press OK and select or create the folder where the project's files are saved.\n" +
-            "The folder should be completely empty if you are creating a new project.");     
-project_dir = getDirectory("Select Project Directory");
+            note);     
+project_dir= getDirectory("Select Project Directory");
 project_name = File.getName(project_dir);
 if (project_dir == "") {
     exit("No project directory selected.");
@@ -473,8 +480,12 @@ temp_dir = project_dir + "temp" + File.separator;
 ilastik_models_dir = project_dir + "Ilastik_models" + File.separator;
 
 // Package project details
-project_expected = newArray(bregma_path,results_dir,results_path,roi_dir,input_image_dir,output_image_dir,temp_dir,ilastik_models_dir);
-PROJECT_ARG = concatArrayIntoStr(project_expected);
+project_expected = newArray(project_dir, bregma_path,results_dir,results_path,roi_dir,input_image_dir,output_image_dir,temp_dir,ilastik_models_dir);
+PROJECT_ARG = project_name+","+concatArrayIntoStr(project_expected);
+
+// ============================================================
+//                          MAIN
+// ============================================================
 
 // Project initilization
 if (type == "new") {
@@ -498,33 +509,7 @@ if (type == "new") {
 if (action == "ROI Workflow"){
     roiWorkflow();
 } else if (action == "Image Processor Workflow") {
-    SUITE_AND_PROJECT_ARG = PASSED_ARG + "," + PROJECT_ARG;
+    SUITE_AND_PROJECT_ARG = PASSED_ARG + PROJECT_ARG;
     runMacro(QUANTIFICATION_PATH, SUITE_AND_PROJECT_ARG);
 }
 
-// =============================================================================
-// MAIN PROGRAM
-// =============================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-macro "ROI Analysis Project Manager" {
-    // Final summary 
-    showMessage("Project Processing Complete", 
-                "All processing finished successfully!\n\n" +
-                "Check your project directory for:\n" +
-                "- Input images\n" +
-                "- ROI files (.zip)\n" +
-                "- Labeled output images\n" +
-                "- Bregma value database");
-}
