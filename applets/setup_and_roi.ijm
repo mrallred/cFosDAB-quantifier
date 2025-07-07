@@ -1,6 +1,7 @@
 // =============================================================================
 // =============================================================================
-// Entry point macro for macro suite. Orients program, defines paths, defines universal functions, runs UI loop
+// Module to setup project: either create a new one, or open an existing one. Contains functions to do ROI creation and workflow
+// Called by main_suite.ijm, calls quantification.ijm if quantification module is chosen.
 // =============================================================================
 // =============================================================================
 

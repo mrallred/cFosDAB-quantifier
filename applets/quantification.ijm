@@ -73,11 +73,45 @@ function cleanupTempDirectory(temp_dir) {
 // ILASTIK PROCESSING FUNCTIONS
 // =============================================================================
 
+function chooseModel() {
+	model_list = getFileList(MODEL_DIR);
+
+	Dialog.create("Select a Ilastik model");
+	Dialog.addChoice("Model: ", model_list, model_list[0]);
+	Dialog.show();
+	
+	selected_model_name = MODEL_DIR + Dialog.getChoice();
+	return selected_model_name;
+}
+
+function saveIlastikOutput(output_path) {
+	saveAs("Tiff", output_path);
+}
+
+function runPixelClassification() {
+	// Process With ilastik
+	model = chooseModel();
+	run("Run Pixel Classification Prediction", "projectfilename=[" + model + "] pixelclassificationtype=[" + "Probabilities"+ "]");
+
+	// Split channels of processed probability map image
+	run("Split Channels");
+	channel_IDs = getImageIDs();
+	c2_ID = channel_IDs[2];
+
+	// Close extra images
+	for (i = 0; i < channel_IDs.length; i++) {
+    	if (channel_IDs[i] != c2_ID) { 
+        	selectImage(channel_IDs[i]);
+        	close();
+    	}
+	 }
+	selectImage(c2_ID);
+}
 // =============================================================================
 // PROCESSOR FUNCTIONS
 // =============================================================================
 
-function processorFindMaxima(original_ID, original_name, workflow) {
+function processorFindMaxima(original_ID, original_name, roi_file_path, workflow) {
 	selectImage(original_ID);
 	
 	// Prepare CSV string
@@ -98,7 +132,6 @@ function processorFindMaxima(original_ID, original_name, workflow) {
 	selectImage(green_ID);
 	
 	// Open ROI file, handle error if it doesn't exist
-	roi_file_path = roi_dir + File.getNameWithoutExtension(original_name) + "_ROIs.zip";
 	if (File.exists(roi_file_path)) {
 		prepROILabels();
 		num_ROIs = roiManager("Count");
@@ -166,27 +199,80 @@ function processorFindMaxima(original_ID, original_name, workflow) {
 	return csv;
 }
 
-function processorIlastik(original_ID, original_name, workflow) {
-    
-    // Prepare CSV string
+function processorIlastik(original_ID, original_name, roi_file_path, workflow) {
+    // Initialize CSV string
 	csv = "";
 
-    // Open image
+    // select image and get dimensions
     selectImage(original_ID);
 
     // Split Channels
 	run("Split Channels");
-	all_image_IDs = getImageIDs();
-	green_ID = all_image_IDs[1];
+	rgb_IDs = getImageIDs();
+	green_ID = rgb_IDs[1];
 
-    // Close extra images
-	for (i = 0; i < all_image_IDs.length; i++) {
-    	if (all_image_IDs[i] != green_ID) { 
-        	selectImage(all_image_IDs[i]);
+    // Close extra images and rename green channel back to og name
+	for (i = 0; i < rgb_IDs.length; i++) {
+    	if (rgb_IDs[i] != green_ID) { 
+        	selectImage(rgb_IDs[i]);
         	close();
     	}
 	 }
 	selectImage(green_ID);
+	rename(original_name);
+
+	// Check if a illastik output exist, load it if so, otherwise run the classification
+	name = File.getNameWithoutExtension(original_name);
+	output_path = temp_dir + name + "_ilastak_output.tif";
+	if (!File.exists(output_path)) {
+		runPixelClassification();
+		saveIlastikOutput(output_path);
+	} else {
+		open(output_path);
+		close(original_name);
+	}
+	ilastik_output_ID = getImageID();
+
+	// post processing
+	run("Median...", "radius=4");
+	run("Gaussian Blur...", "sigma=2");
+
+	// Thresholding
+	setAutoThreshold("IsoData dark no-reset");
+	setThreshold(0.2745, 1000000000000000000000000000000.0000);
+	setOption("BlackBackground", true);
+	run("Convert to Mask");
+	run("Watershed");
+
+	// Open ROI file, handle error if it doesn't exist
+	if (File.exists(roi_file_path)) {
+		prepROILabels();
+		num_ROIs = roiManager("Count");
+		
+		if (workflow == "single") {
+        	waitForUser("Proceed to process?");
+        	
+        	// Save ROIs in case they were changed
+        	if (num_ROIs > 0) {
+   				roiManager("Save", roi_file_path);
+			}
+		}	
+	} else {
+		exit("ROI file does not exist for this image. Ensure it is named properly and in the correct folder.";
+	}
+
+	// For each ROI, run analyze particles and append results
+	for (i = 0; i < num_ROIs ; i++) {
+		selectImage(ilastik_output_ID);
+	    roiManager("Select", i);
+
+		// analyze particles
+		run("Analyze Particles...", "size=30-Infinity circularity=0.10-1.00 clear summarize add record");
+	}
+
+	waitForUser("check");
+
+	return csv;
 }
 
 // =============================================================================
@@ -206,17 +292,18 @@ function singleImageWorkflow(image_list, processor) {
 	selected_image_name = Dialog.getChoice();
 	selected_image_name_no_ext = File.getNameWithoutExtension(selected_image_name);
 	selected_image_path = input_image_dir + selected_image_name;
+	roi_file_path = roi_dir + File.getNameWithoutExtension(selected_image_name) + "_ROIs.zip";
 	
 	open(selected_image_path);
 	selected_ID = getImageID();
 	
 	// Run correct processor
 	if (processor == "findmaxima"){
-		results = processorFindMaxima(selected_ID, selected_image_name, "single");
+		results = processorFindMaxima(selected_ID, selected_image_name, roi_file_path, "single");
 		final_csv = csv_header_findmaxima + results;
 		suffix = "_findmaxima_processed";
 	} else if (processor == "ilastik") {
-		results = processorIlastik(selected_ID, selected_image_name, "single");
+		results = processorIlastik(selected_ID, selected_image_name, roi_file_path, "single");
 		final_csv = csv_header_ilastik + results;
         suffix = "_ilastik_processed"; 
 	}
@@ -263,15 +350,16 @@ function batchWorkflow(image_list, processor) {
 		selected_image_name = image_list[i];
 		selected_image_name_no_ext = File.getNameWithoutExtension(selected_image_name);
 		selected_image_path = input_image_dir + selected_image_name;
+		roi_file_path = roi_dir + File.getNameWithoutExtension(selected_image_name) + "_ROIs.zip";
 		
 		open(selected_image_path);
 		selected_ID = getImageID();
 		
 		// Run correct processor
         if (processor == "findmaxima") {
-            results = processorFindMaxima(selected_ID, selected_image_name, "batch");
+            results = processorFindMaxima(selected_ID, selected_image_name, roi_file_path, "batch");
         } else if (processor == "ilastik") {
-            results = processorIlastik(selected_ID, selected_image_name, "batch");
+            results = processorIlastik(selected_ID, selected_image_name, roi_file_path, "batch");
         }
 		
 		batch_csv_str += results;
@@ -374,6 +462,6 @@ while (continue_loop){
         continue_loop = false;
     }
 }
-exit("Finished Processing. Macro will close.");
+exit("Finished Processing. Quantification module will close.");
 
 
