@@ -1,6 +1,7 @@
 // =============================================================================
 // =============================================================================
-// Entry point macro for macro suite. Orients program, defines paths, defines universal functions, runs UI loop
+// Module to setup project: either create a new one, or open an existing one. Contains functions to do ROI creation and workflow
+// Called by main_suite.ijm, calls quantification.ijm if quantification module is chosen.
 // =============================================================================
 // =============================================================================
 
@@ -18,6 +19,7 @@ function cleanUp() {
 	close("Results");
 	close("ROI Manager");
     close("Log");
+    close("Summary");
 }
 
 function getImageIDs() {
@@ -176,7 +178,7 @@ function setupNew(project_expected){
         File.makeDirectory(roi_dir);
         File.makeDirectory(input_image_dir);
         File.makeDirectory(output_image_dir);
-        File.makeDirectory(temp_dir);
+        File.makeDirectory(ilastik_output_dir);
         File.makeDirectory(ilastik_models_dir);
         initializeBregmaDB(bregma_path);
         initializeProjectResults(results_path);
@@ -319,29 +321,26 @@ function roiWorkflow() {
         // Open the copied image
         open(copied_path);
         
-        // Get image info
+        // Get roi path
         roi_file_path = roi_dir + base_name + "_ROIs.zip";
-        output_image_path = output_image_dir + base_name + "_labeled.png";
-        
-        print("Processing image: " + image_name);
 
         // Check if bregma value already exists for this image
-        existing_bregma = getBregmaValue(bregma_path, image_name);
+        existing_bregma = getBregmaValue(bregma_path, tiff_name);
         
         // Prompt for bregma value
         if (existing_bregma != "") {
             // Show existing value and allow update
             Dialog.create("Bregma Value");
-            Dialog.addMessage("The current bregma value for " + image_name + ": " + existing_bregma);
+            Dialog.addMessage("The current bregma value for " + tiff_name + ": " + existing_bregma);
             Dialog.addNumber("Enter new bregma value (or keep current):", parseFloat(existing_bregma));
             Dialog.show();
             
             current_bregma = toString(Dialog.getNumber());
-            saveBregmaValue(bregma_path, image_name, current_bregma);
+            saveBregmaValue(bregma_path, tiff_name, current_bregma);
         } else {
             // No existing value, prompt for new one
-            current_bregma = getString("Enter bregma value for " + image_name + ":", "0.000");
-            saveBregmaValue(bregma_path, image_name, current_bregma);
+            current_bregma = getString("Enter bregma value for " + tiff_name + ":", "0.000");
+            saveBregmaValue(bregma_path, tiff_name, current_bregma);
         }
 
         // Store original image ID and ensure RGB
@@ -476,11 +475,11 @@ results_path = results_dir + "results.csv";
 roi_dir = project_dir + "ROI_files" + File.separator;
 input_image_dir = project_dir + "Input_images" + File.separator;
 output_image_dir = project_dir + "Output_images" + File.separator;
-temp_dir = project_dir + "temp" + File.separator;
+ilastik_output_dir = project_dir + "ilastik_processed" + File.separator;
 ilastik_models_dir = project_dir + "Ilastik_models" + File.separator;
 
 // Package project details
-project_expected = newArray(project_dir, bregma_path,results_dir,results_path,roi_dir,input_image_dir,output_image_dir,temp_dir,ilastik_models_dir);
+project_expected = newArray(project_dir, bregma_path,results_dir,results_path,roi_dir,input_image_dir,output_image_dir,ilastik_output_dir,ilastik_models_dir);
 PROJECT_ARG = project_name+","+concatArrayIntoStr(project_expected);
 
 // ============================================================
@@ -509,7 +508,10 @@ if (type == "new") {
 if (action == "ROI Workflow"){
     roiWorkflow();
 } else if (action == "Image Processor Workflow") {
+    print("made it to call");
     SUITE_AND_PROJECT_ARG = PASSED_ARG + PROJECT_ARG;
+    print("args: " + SUITE_AND_PROJECT_ARG);
+    waitForUser("check syntax");
     runMacro(QUANTIFICATION_PATH, SUITE_AND_PROJECT_ARG);
 }
 
