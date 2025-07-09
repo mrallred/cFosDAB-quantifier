@@ -134,11 +134,9 @@ function copyImageToInputDir(source_path, input_image_dir) {
     destination_path = input_image_dir + base_name + ".tif";
     
     // Always open and save as TIFF for consistency
-    print("Converting image to TIFF format...");
     open(source_path);
     saveAs("TIFF", destination_path);
     close();
-    print("Image converted and saved as TIFF: " + destination_path);
     return destination_path;
 }
 
@@ -204,6 +202,18 @@ function openExisting(project_expected) {
     } else{
         print("Project Opened.");
     }   
+}
+function convertImportDirectory(input_image_dir) {
+    dir = getDirectory("Choose folder containing jpg images to import into project: ");
+
+    list = getFileList(dir);
+    for (i=0; i<list.length; i++){
+        if (endsWith(list[i], ".jpg") || endsWith(list[i], ".jpeg")) {
+            open(dir + list[i]);
+            saveAs("Tiff", input_image_dir + replace(list[i], ".jpg", ".tif"));
+            close();
+        }
+    }
 }
 // ============================================================
 //                       ROI FUNCTIONS
@@ -397,7 +407,6 @@ function roiWorkflow() {
             }
             
             roiManager("Save", roi_file_path);
-            print("ROIs saved: " + roi_file_path);
             
             // Show all ROIs with labels
             roiManager("Show All");
@@ -495,7 +504,7 @@ if (type == "new") {
     openExisting(project_expected);
     
     // Create a dialog to choose whether to enter processing menu or roi selection
-    options = newArray("ROI Workflow", "Image Processor Workflow");
+    options = newArray("ROI Workflow", "Image Processor Workflow", "Convert and import images");
     Dialog.create("Choose workflow");
     Dialog.addMessage(project_name + "is loaded. Choose ROI Workflow to add/modify ROIs, or enter the processing workflow for quantification tools.");
     Dialog.addChoice("Workflow:", options);
@@ -508,10 +517,10 @@ if (type == "new") {
 if (action == "ROI Workflow"){
     roiWorkflow();
 } else if (action == "Image Processor Workflow") {
-    print("made it to call");
     SUITE_AND_PROJECT_ARG = PASSED_ARG + PROJECT_ARG;
-    print("args: " + SUITE_AND_PROJECT_ARG);
-    waitForUser("check syntax");
     runMacro(QUANTIFICATION_PATH, SUITE_AND_PROJECT_ARG);
+} else if (action == "Convert and import images") {
+    convertImportDirectory(input_image_dir);
 }
+
 
