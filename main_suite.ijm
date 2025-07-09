@@ -1,6 +1,6 @@
 // =============================================================================
 // =============================================================================
-// Entry point macro for macro suite. Orients program, defines paths, defines universal functions, runs UI loop
+// Entry point macro for macro suite. Orients program, defines paths, defines universal functions, runs UI loop, calling setup_and_roi
 // =============================================================================
 // =============================================================================
 
