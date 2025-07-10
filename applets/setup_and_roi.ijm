@@ -218,6 +218,42 @@ function convertImportDirectory(input_image_dir) {
 // ============================================================
 //                       ROI FUNCTIONS
 // ============================================================
+function findMissingROIs(roi_dir,input_image_dir) {
+    roi_list = getFileList(roi_dir);
+    input_image_list = getFileList(input_image_dir);
+
+    print("=== Missing ROI Files Report ===");
+    print("ROI files found: " + lengthOf(roi_list));
+    print("Input images found: " + lengthOf(input_image_list));
+    print("");
+    
+    missing_count = 0;
+    
+    for (i=0; i < lengthOf(input_image_list); i++) {
+        if (endsWith(input_image_list[i], ".tif")){
+            base_name = File.getNameWithoutExtension(input_image_list[i]);
+            expected_roi_file = base_name + "_ROIs.zip";
+
+            roi_exists = false;
+            for (j = 0; j < lengthOf(roi_list); j++) {
+                if (roi_list[j] == expected_roi_file) {
+                    roi_exists = true;
+                    break;
+                }
+            }
+            
+            if (!roi_exists) {
+                print("- MISSING: " + expected_roi_file + " (for image: " + input_image_list[i] + ")");
+                missing_count++;
+            }
+        }
+    }
+    if (missing_count == 0) {
+        print("All input images have corresponding ROI files!");
+    } else {
+        print("Found " + missing_count + " missing ROI files.");
+    }
+}
 function collectROIsByRegion() {
     setTool("polygon");
     RoiManager.useNamesAsLabels(true);
@@ -504,7 +540,7 @@ if (type == "new") {
     openExisting(project_expected);
     
     // Create a dialog to choose whether to enter processing menu or roi selection
-    options = newArray("ROI Workflow", "Image Processor Workflow", "Convert and import images");
+    options = newArray("ROI Workflow", "Image Processor Workflow", "Convert and import images", "Find missing ROI");
     Dialog.create("Choose workflow");
     Dialog.addMessage(project_name + "is loaded. Choose ROI Workflow to add/modify ROIs, or enter the processing workflow for quantification tools.");
     Dialog.addChoice("Workflow:", options);
@@ -521,6 +557,8 @@ if (action == "ROI Workflow"){
     runMacro(QUANTIFICATION_PATH, SUITE_AND_PROJECT_ARG);
 } else if (action == "Convert and import images") {
     convertImportDirectory(input_image_dir);
+} else if (action == "Find missing ROI") {
+    findMissingROIs(roi_dir,input_image_dir);
 }
 
 
