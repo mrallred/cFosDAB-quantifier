@@ -10,6 +10,7 @@ colors = newArray("#FF0000", "#0000FF", "#00FF00", "#FFFF00", "#FF00FF", "#00FFF
 // Initilize headers for result outputs as global variables
 csv_header_findmaxima = "ID,File name,ROI,Area of ROI (px^2),Bregma,Count(FindMaxima)\n";
 csv_header_ilastik = "ID,File name,ROI,Area of ROI (px^2),Bregma,Count(Ilastik)\n";
+csv_header_manual = "ID,File name,ROI,Area of ROI (px^2),Bregma,Count(Manual)\n";
 
 // GENERAL FUNCTIONS
 // =============================================================================
@@ -339,6 +340,85 @@ function processorIlastik(original_ID, original_name, roi_file_path, workflow, m
 	return csv;
 }
 
+function processorCountManually(original_ID, original_name, roi_file_path) {
+	csv = "";
+	name = File.getNameWithoutExtension(original_name);
+
+	// Open ROI file, handle error if it doesn't exist
+	if (File.exists(roi_file_path)) {
+		prepROILabels();
+		num_ROIs = roiManager("Count");
+		
+		waitForUser("You can adjust ROIs here if needed. Proceed to process?");
+        	
+        // Save ROIs in case they were changed
+        if (num_ROIs > 0) {
+   			roiManager("Save", roi_file_path);
+		}
+	} else {
+		exit("ROI file does not exist for this image. Ensure it is named properly and in the correct folder.");
+	}
+
+
+	// For each ROI, guide user to count cells
+	for (i=0; i < num_ROIs; i++) {
+		selectImage(original_ID);
+		roiManager("Select", i);
+
+		// get roi info
+		ROI_area = getValue("Area");
+        ROI_label = Roi.getName();
+        bregma = getBregmaValue(bregma_path, original_name);
+        file_name_parts = split(original_name, "_");
+        animal_ID = file_name_parts[0];
+
+		// Add ROI overlay with distinct color
+        Overlay.addSelection("", colors[i % colors.length]);
+        
+		// Zoom to ROI for better visibility
+		run("To Selection");
+
+		// Set multipoint tool and clear any existing selection
+        setTool("multipoint");
+        run("Select None");
+        roiManager("Select", i); 
+		roiManager("show all without labels");
+
+		waitForUser("Manual Counting - ROI " + (i+1) + " of " + num_ROIs, 
+                   "ROI: " + ROI_label + "\n" +
+                   "Area: " + d2s(ROI_area, 0) + " px²\n\n" +
+                   "Instructions:\n" +
+                   "1. Use the multipoint tool (already selected) to mark objects\n" +
+                   "2. Click on objects within the highlighted ROI boundaries\n" +
+                   "3. Hold Shift and click to add multiple points\n" +
+                   "4. Press Alt+click to remove a point if needed\n" +
+                   "5. Click OK when finished counting this ROI");
+
+		// Get count from multipoint selection
+        roi_count = 0;
+        if (selectionType() == 10) { // Multi-point selection
+            getSelectionCoordinates(xpoints, ypoints);
+            roi_count = xpoints.length;
+            
+            // Add point overlays to image
+			run("RGB Color");
+	    	setForegroundColor(255,0,0);
+	    	for (j = 0; j < xpoints.length; j++) {
+    			makeOval(xpoints[j]-1, ypoints[j]-1, 5, 5); 
+    			run("Fill", "slice");
+        	}
+		}
+		run("Select None");
+
+		// write to output string
+		csv += toString(animal_ID) + "," + original_name + "," + ROI_label + "," + toString(ROI_area) + "," + toString(bregma) + "," + toString(roi_count) + "\n";
+	}
+
+	Overlay.show();
+    run("Flatten");
+    
+    return csv;
+}
 // =============================================================================
 // WORKFLOW FUNCTIONS
 // =============================================================================
@@ -371,8 +451,7 @@ function singleImageWorkflow(image_list, processor) {
 		results = processorIlastik(selected_ID, selected_image_name, roi_file_path, "single", model);
 		final_csv = csv_header_ilastik + results;
         suffix = "_ilastik_processed"; 
-	}
-	
+	} 
 	
 	// Save csv and overlay image
 	File.saveString(final_csv, results_dir + selected_image_name_no_ext + suffix + ".csv");
@@ -396,16 +475,16 @@ function batchWorkflow(image_list, processor) {
         batch_csv_str = csv_header_ilastik;
         suffix = "_ilastik_batch_processed";
 		model = chooseModel();
-    }
-    
-    // Progress tracking
+    } 
+	
+	// Progress tracking
     start_time = getTime();
 	
 	// go through all images in project input_image list
 	for (i=0; i < image_list.length; i++) {
 		progress = (i + 1) / image_list.length * 100;
-        showProgress(progress / 100);
-        showStatus("Processing image " + (i + 1) + " of " + image_list.length + " (" + d2s(progress, 1) + "%)");
+    	showProgress(progress / 100);
+    	showStatus("Processing image " + (i + 1) + " of " + image_list.length + " (" + d2s(progress, 1) + "%)");
         
 		// Extract paths and names for current image
 		selected_image_name = image_list[i];
@@ -418,20 +497,22 @@ function batchWorkflow(image_list, processor) {
 		
 		// Run correct processor
         if (processor == "findmaxima") {
-            results = processorFindMaxima(selected_ID, selected_image_name, roi_file_path, "batch");
+        	results = processorFindMaxima(selected_ID, selected_image_name, roi_file_path, "batch");
         } else if (processor == "ilastik") {
             results = processorIlastik(selected_ID, selected_image_name, roi_file_path, "batch", model);
-        }
+        } 
 		
 		batch_csv_str += results;
 		
-		saveAs("Tiff", output_image_dir + selected_image_name_no_ext +"_batch_processed");
+		saveAs("Tiff", output_image_dir + selected_image_name_no_ext + suffix);
 		
 		cleanUp();
         run("Collect Garbage");
 	}
+	
+
 	// Save aggregated csv to results.csv
-	File.saveString(batch_csv_str, results_path);
+	File.saveString(batch_csv_str, results_dir + "results" + suffix + ".csv");
 	
 	// Show completion time
     end_time = getTime();
@@ -439,6 +520,44 @@ function batchWorkflow(image_list, processor) {
     showMessage("Batch Processing Complete", 
                 "Processed " + image_list.length + " images in " + d2s(processing_time, 1) + " seconds\n" +
                 "Average: " + d2s(processing_time / image_list.length, 1) + " seconds per image");
+}
+
+function manualWorkflow(image_list) {
+	if (image_list.length == 0) {
+		exit("No images found in input_images folder.");
+	}
+	batch_csv_str = csv_header_manual;
+	suffix = "_manually_processed";
+
+	continue_manual = true;
+	while (continue_manual) {
+		// Create Dialog to select image
+		Dialog.create("Select an Image");
+		Dialog.addChoice("Image: ", image_list, image_list[0]);
+		Dialog.addCheckbox("Process another image?", true);
+		Dialog.show();
+		
+		continue_manual = Dialog.getCheckbox();
+		if (!continue_manual) {
+			break;
+		}
+		selected_image_name = Dialog.getChoice();
+		selected_image_name_no_ext = File.getNameWithoutExtension(selected_image_name);
+		selected_image_path = input_image_dir + selected_image_name;
+		roi_file_path = roi_dir + File.getNameWithoutExtension(selected_image_name) + "_ROIs.zip";
+
+		open(selected_image_path);
+		selected_ID = getImageID();
+
+		results = processorCountManually(selected_ID, selected_image_name, roi_file_path);
+		batch_csv_str += results;
+
+		saveAs("Tiff", output_image_dir + selected_image_name_no_ext + suffix);
+		cleanUp();
+	}
+
+	// Save aggregated csv to results.csv
+	File.saveString(batch_csv_str, results_dir + "results" + suffix + ".csv");
 }
 // =============================================================================
 // RECOVER PASSED VARIABLES
@@ -464,12 +583,11 @@ project_name = parts[7];
 project_dir = parts [8];
 bregma_path = parts[9];
 results_dir = parts[10];
-results_path = parts[11];
-roi_dir = parts[12];
-input_image_dir = parts[13];
-output_image_dir = parts[14];
-ilastik_output_dir = parts[15];
-ilastik_models_dir = parts[16];
+roi_dir = parts[11];
+input_image_dir = parts[12];
+output_image_dir = parts[13];
+ilastik_output_dir = parts[14];
+ilastik_models_dir = parts[15];
 
 
 // =============================================================================
@@ -479,7 +597,7 @@ ilastik_models_dir = parts[16];
 cleanUp();
 
 // Generate image file list and its length
-image_list = Array.sort(getFileList(input_image_dir));
+image_list = getFileList(input_image_dir);
 num_images = image_list.length;
 
 // Initialize main dialog/workflow selection
@@ -488,6 +606,7 @@ workflows = newArray(
     "Process Single Image (Ilastik)", 
     "Process All Images (FindMaxima)", 
     "Process All Images (Ilastik)", 
+	"Process Images Manually",
     "Quit Image Processor");
 continue_loop = true;
 
@@ -511,6 +630,8 @@ while (continue_loop){
         batchWorkflow(image_list, "findmaxima");
     } else if (action == "Process All Images (Ilastik)") {
         batchWorkflow(image_list, "ilastik");
+	} else if (action == "Process Images Manually"){
+		manualWorkflow(image_list);
     } else if (action == "Quit Image Processor") {
         continue_loop = false;
     }
