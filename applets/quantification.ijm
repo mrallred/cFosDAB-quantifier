@@ -526,7 +526,6 @@ function manualWorkflow(image_list) {
 	if (image_list.length == 0) {
 		exit("No images found in input_images folder.");
 	}
-	batch_csv_str = csv_header_manual;
 	suffix = "_manually_processed";
 
 	continue_manual = true;
@@ -546,18 +545,24 @@ function manualWorkflow(image_list) {
 		selected_image_path = input_image_dir + selected_image_name;
 		roi_file_path = roi_dir + File.getNameWithoutExtension(selected_image_name) + "_ROIs.zip";
 
+		if (File.exists(results_dir + "results" + suffix + ".csv")) {
+			batch_csv_str = File.openAsString(results_dir + "results" + suffix + ".csv");
+		} else {
+			batch_csv_str = csv_header_manual;
+		}
+
 		open(selected_image_path);
 		selected_ID = getImageID();
 
 		results = processorCountManually(selected_ID, selected_image_name, roi_file_path);
 		batch_csv_str += results;
 
+		// append aggregated csv to results.csv
+		File.saveString(batch_csv_str, results_dir + "results" + suffix + ".csv");
+
 		saveAs("Tiff", output_image_dir + selected_image_name_no_ext + suffix);
 		cleanUp();
 	}
-
-	// Save aggregated csv to results.csv
-	File.saveString(batch_csv_str, results_dir + "results" + suffix + ".csv");
 }
 // =============================================================================
 // RECOVER PASSED VARIABLES
