@@ -1,6 +1,13 @@
 // =============================================================================
 // =============================================================================
-// Module to setup project: either create a new one, or open an existing one. Contains functions to do ROI creation and workflow
+// Module to setup project. Two main pathes:
+// 1. If main_suite passed "new": sets up a new project's files and launches them immediately into the roi workflow
+// 2. If main_suite passed "existing": brings up a dialog to choose between 4 workflows:
+//      * Roi workflow --- Allows user to create or edit ROIs for any file, either already in the project or new to be added.
+//      * Image processor --- Faciliates all quantification processing tools (currently ilastik and findmaxima based processors).
+//      * Convert and import images --- Opens a whole folder of .jpgs and import them into project directry input_image_dir.
+//      * Find missing ROI files  --- compares roi_dir to input_image_dir to find any missing ROI files for input image.
+
 // Called by main_suite.ijm, calls quantification.ijm if quantification module is chosen.
 // =============================================================================
 // =============================================================================
@@ -58,14 +65,6 @@ function initializeBregmaDB(bregma_path) {
         headers = "Filename,Bregma\n";
         File.saveString(headers, bregma_path);
         print("Bregma database initialized: " + bregma_path);
-    }
-}
-
-function initializeProjectResults(results_path) {
-    if (!File.exists(results_path)) {
-        headers = "ID,Filename,ROI,ROI Area(px^2),L-R,Bregma,Count";
-        File.saveString(headers, results_path);
-        print("Project Result database initialized: " + results_path);
     }
 }
 
@@ -178,9 +177,7 @@ function setupNew(project_expected){
         File.makeDirectory(output_image_dir);
         File.makeDirectory(ilastik_output_dir);
         File.makeDirectory(ilastik_models_dir);
-        initializeBregmaDB(bregma_path);
-        initializeProjectResults(results_path);
-        
+        initializeBregmaDB(bregma_path);    
     } else {
         exit("This folder is not empty. Please Select an empty folder or use Open Existing Proejct to avoid losing project data");
     }
@@ -516,7 +513,6 @@ if (project_dir == "") {
 // Define Project Paths 
 bregma_path = project_dir + "bregma_values.csv";
 results_dir = project_dir + "Results" + File.separator;
-results_path = results_dir + "results.csv";
 roi_dir = project_dir + "ROI_files" + File.separator;
 input_image_dir = project_dir + "Input_images" + File.separator;
 output_image_dir = project_dir + "Output_images" + File.separator;
@@ -524,7 +520,7 @@ ilastik_output_dir = project_dir + "ilastik_processed" + File.separator;
 ilastik_models_dir = project_dir + "Ilastik_models" + File.separator;
 
 // Package project details
-project_expected = newArray(project_dir, bregma_path,results_dir,results_path,roi_dir,input_image_dir,output_image_dir,ilastik_output_dir,ilastik_models_dir);
+project_expected = newArray(project_dir, bregma_path,results_dir,roi_dir,input_image_dir,output_image_dir,ilastik_output_dir,ilastik_models_dir);
 PROJECT_ARG = project_name+","+concatArrayIntoStr(project_expected);
 
 // ============================================================

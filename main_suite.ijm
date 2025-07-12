@@ -1,6 +1,7 @@
 // =============================================================================
 // =============================================================================
-// Entry point macro for macro suite. Orients program, defines paths, defines universal functions, runs UI loop, calling setup_and_roi
+// Entry point macro for cFos-DAB suite. Orients program in file system, defines paths, defines universal functions,
+// runs UI loop and enters user into workflow, calling setup_and_roi macro to do so.
 // =============================================================================
 // =============================================================================
 
@@ -90,7 +91,7 @@ while (continue_loop){
         runMacro(SETUP_PATH, args);
     } else {
         cleanUp();
-        exit("Macro quit.");
+        break;
     }
 }
 
