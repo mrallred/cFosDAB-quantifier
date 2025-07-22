@@ -2,9 +2,9 @@
 ImageJ macro workflow kit for counting cells in brightfield IHC images. Developed for cFos DAB stained neural tissue.
 
 Made up of three macro scripts:
-1.) launch_macro.ijm: Macro run by user to start. Ensures the suite's integrity and runs the main loop to enter into the setup_and_roi macro.
-2.) setup_and_roi.ijm: Facilitates project structure setup, workflow selection, and the tools to add and edit project images and ROIs.
-3.) quantification.ijm: Runs all quantification tools/processors, allowing for single image and batch processing. Functionality includes: 
+1. launch_macro.ijm: Macro run by user to start. Ensures the suite's integrity and runs the main loop to enter into the setup_and_roi macro.
+2. setup_and_roi.ijm: Facilitates project structure setup, workflow selection, and the tools to add and edit project images and ROIs.
+3. quantification.ijm: Runs all quantification tools/processors, allowing for single image and batch processing. Functionality includes: 
     - Manual counting
     - FindMaxima automatic
     - Ilastik automatic
