@@ -9,4 +9,4 @@ Made up of three macro scripts:
     - FindMaxima automatic
     - Ilastik automatic
 
-Ilastik workflow requires Ilastik (https://www.ilastik.org/download) to be installed on your machine, and the Fiji/ilastik plugin (https://www.ilastik.org/documentation/fiji_export/plugin) to be enabled and installed. It used the pixel classification workflow, and other models can be trained in ilastik and imported into this macro by adding them the the models folder.
+Ilastik workflow requires Ilastik (https://www.ilastik.org/download) to be installed on your machine, and the Fiji/ilastik plugin (https://www.ilastik.org/documentation/fiji_export/plugin) to be enabled and installed. It uses the pixel classification workflow, and models can be trained in Ilastik and imported into this macro by adding them the the models folder, or the default can be used.
