@@ -64,7 +64,6 @@ function initializeBregmaDB(bregma_path) {
     if (!File.exists(bregma_path)) {
         headers = "Filename,Bregma\n";
         File.saveString(headers, bregma_path);
-        print("Bregma database initialized: " + bregma_path);
     }
 }
 
@@ -103,7 +102,6 @@ function saveBregmaValue(bregma_path, filename, bregma_value) {
         content = "Filename,Bregma\n" + filename + "," + bregma_value + "\n";
         File.saveString(content, bregma_path);
     }
-    print("Saved bregma value: " + filename + " = " + bregma_value);
 }
 
 function getBregmaValue(bregma_path, file_name) {
@@ -170,7 +168,6 @@ function setupNew(project_expected){
     // Initilize Project structure and files
     project_file_list = getFileList(project_dir);
     if (project_file_list.length == 0) {
-        print("Setting up new project structure...");
         File.makeDirectory(results_dir);
         File.makeDirectory(roi_dir);
         File.makeDirectory(input_image_dir);
@@ -186,9 +183,7 @@ function setupNew(project_expected){
     missing = checkStructure(project_expected);
     if (missing != "") {
         exit("Project structure is not correct. Something must have gone wrong. Try emptying folder and creating project again.\nMissing:\n"+missing);
-    } else{
-        print("Project Initialized.");
-    }   
+    }
 }
 
 function openExisting(project_expected) {
@@ -196,9 +191,7 @@ function openExisting(project_expected) {
     missing = checkStructure(project_expected);
     if (missing != "") {
         exit("Project structure is not correct. Ensure valid project folder.\nMissing:\n"+missing);
-    } else{
-        print("Project Opened.");
-    }   
+    }
 }
 function convertImportDirectory(input_image_dir) {
     dir = getDirectory("Choose folder containing jpg images to import into project: ");
@@ -356,7 +349,6 @@ function roiWorkflow() {
         tiff_name = base_name + ".tif";
         if (isFileInDirectory(input_image_dir, tiff_name)) {
         	copied_path = input_image_dir + tiff_name;
-        	print("Image of same name already in project. Opening existing TIFF image.");
         } else {
         	copied_path = copyImageToInputDir(image_path, input_image_dir);
         }
@@ -496,15 +488,13 @@ MAIN_SUITE_PATH = parts[6];
 // note for new projects
 if (type == "new"){
     note = "The folder should be completely empty.";
-} else {
-    note = "";
+    waitForUser("Select Your Project Directory", 
+            "Press OK and select or create the folder where the project's files are saved.\n" +
+            note);  
 }
 
-// Prompt users to select project directory
-waitForUser("Select Your Project Directory", 
-            "Press OK and select or create the folder where the project's files are saved.\n" +
-            note);     
-project_dir= getDirectory("Select Project Directory");
+// Prompt users to select project directory   
+project_dir=getDirectory("Select Project Directory");
 project_name = File.getName(project_dir);
 if (project_dir == "") {
     exit("No project directory selected.");
@@ -527,34 +517,40 @@ PROJECT_ARG = project_name+","+concatArrayIntoStr(project_expected);
 //                          MAIN
 // ============================================================
 
+
 // Project initilization
 if (type == "new") {
     setupNew(project_expected);
-    action = "ROI Workflow";
+} 
 
-} else if (type == "existing") {
+continue_loop = true;
+while (continue_loop){
     openExisting(project_expected);
     
-    // Create a dialog to choose whether to enter processing menu or roi selection
-    options = newArray("ROI Workflow", "Image Processor Workflow", "Convert and import images", "Find missing ROI");
+    // Create a dialog to choose whether to workflow
+    options = newArray("ROI Workflow", "Image Processor Workflow", "Convert and import images", "Find missing ROI", "Exit Project");
     Dialog.create("Choose workflow");
-    Dialog.addMessage(project_name + "is loaded. Choose ROI Workflow to add/modify ROIs, or enter the processing workflow for quantification tools.");
+    Dialog.addMessage(project_name + " is loaded.\nROI Workflow: Add new images and/or modify ROIs\nImage Processor Workflow: Access quantification tools and process images with defined ROIs\nConvert and import images: Open a folder of jpg images and import them into the project folder\nFind missing ROI: Check if all images in input_image_dir have ROIs defined\nExit Project: Exit and return to launch menu");
     Dialog.addChoice("Workflow:", options);
     Dialog.show();
 
     action = Dialog.getChoice();
+
+    // Enter workflow
+    if (action == "ROI Workflow"){
+        roiWorkflow();
+    } else if (action == "Image Processor Workflow") {
+        SUITE_AND_PROJECT_ARG = PASSED_ARG + PROJECT_ARG;
+        runMacro(QUANTIFICATION_PATH, SUITE_AND_PROJECT_ARG);
+    } else if (action == "Convert and import images") {
+        convertImportDirectory(input_image_dir);
+    } else if (action == "Find missing ROI") {
+        findMissingROIs(roi_dir,input_image_dir);
+    } else if (action == "Exit Project"){
+        continue_loop = false;
+        break;
+    }
 }
 
-// Enter module
-if (action == "ROI Workflow"){
-    roiWorkflow();
-} else if (action == "Image Processor Workflow") {
-    SUITE_AND_PROJECT_ARG = PASSED_ARG + PROJECT_ARG;
-    runMacro(QUANTIFICATION_PATH, SUITE_AND_PROJECT_ARG);
-} else if (action == "Convert and import images") {
-    convertImportDirectory(input_image_dir);
-} else if (action == "Find missing ROI") {
-    findMissingROIs(roi_dir,input_image_dir);
-}
 
 

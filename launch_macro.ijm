@@ -42,17 +42,17 @@ function concatArrayIntoStr(array){
 //         DEFINE SUITE PATHS
 // ================================
 
-// HARD WIRED TO REPO FOR NOW ----- CHANGE ONCE IMPLEMENTED?
-MAIN_DIR = File.directory;
+// sets file directory location of launch macro to set other paths
+MAIN_DIR = getDirectory("plugins") + "cell-quantifier-workflows" + File.separator;
 
 // Define suite component paths
-APPLET_DIR = MAIN_DIR + "applets" + File.separator;
+MACRO_DIR = MAIN_DIR + "macros" + File.separator;
 MODEL_DIR = MAIN_DIR + "models" + File.separator;
-QUANTIFICATION_PATH = APPLET_DIR + "quantification.ijm";
-SETUP_PATH = APPLET_DIR + "setup_and_roi.ijm";
-MAIN_SUITE_PATH = MAIN_DIR + "main_suite.ijm";
+QUANTIFICATION_PATH = MACRO_DIR + "quantification.ijm";
+SETUP_PATH = MACRO_DIR + "setup_and_roi.ijm";
+LAUNCH_MACRO_PATH = MAIN_DIR + "launch_macro.ijm";
 
-SUITE_EXPECTED = newArray(MAIN_DIR, APPLET_DIR, MODEL_DIR, QUANTIFICATION_PATH,SETUP_PATH,MAIN_SUITE_PATH);
+SUITE_EXPECTED = newArray(MAIN_DIR, MACRO_DIR, MODEL_DIR, QUANTIFICATION_PATH,SETUP_PATH,LAUNCH_MACRO_PATH);
 SUITE_ARG = concatArrayIntoStr(SUITE_EXPECTED);
 
 // ================================
@@ -65,8 +65,6 @@ SUITE_ARG = concatArrayIntoStr(SUITE_EXPECTED);
 missing = checkStructure(SUITE_EXPECTED);
 if (missing != "") {
     exit("Macro suite not properly setup. Try updating it.\nMissing:\n"+missing);
-} else{
-    print("Suite is intact.");
 }
 
 // Main loop

@@ -282,7 +282,6 @@ function processorIlastik(original_ID, original_name, roi_file_path, workflow, m
 
 	// ensure duplicate image still exists
 	if (!isOpen(dup_ID)) {
-        print("WARNING: Duplicate image was closed! Recreating from ilastik output...");
         open(input_image_dir+original_name);
         run("Duplicate...", "title="+name+"_OGDup_Recreated");
         dup_ID = getImageID();
@@ -384,13 +383,15 @@ function processorCountManually(original_ID, original_name, roi_file_path) {
         roiManager("Select", i); 
 		roiManager("show all without labels");
 
+		selectImage(original_ID);
+
 		waitForUser("Manual Counting - ROI " + (i+1) + " of " + num_ROIs, 
                    "ROI: " + ROI_label + "\n" +
                    "Area: " + d2s(ROI_area, 0) + " px²\n\n" +
                    "Instructions:\n" +
                    "1. Use the multipoint tool (already selected) to mark objects\n" +
-                   "2. Click on objects within the highlighted ROI boundaries\n" +
-                   "3. Hold Shift and click to add multiple points\n" +
+				   "2. Hold Shift and click to start\n" +
+                   "3. Click on objects within the highlighted ROI boundaries\n" +
                    "4. Press Alt+click to remove a point if needed\n" +
                    "5. Click OK when finished counting this ROI");
 
@@ -641,6 +642,5 @@ while (continue_loop){
         continue_loop = false;
     }
 }
-exit("Finished Processing. Quantification module will close.");
 
 
