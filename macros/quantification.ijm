@@ -92,7 +92,7 @@ function saveIlastikOutput(output_path) {
 
 function runPixelClassification(model, image_name) {
 	// Process With ilastik
-	run("Run Pixel Classification Prediction", "inputimage=[" + image_name + "] projectfilename=[" + model + "] pixelclassificationtype=[" + "Probabilities"+ "]");
+	run("Run Pixel Classification Prediction", "projectfilename=[" + model + "] input=[" + image_name + "] pixelclassificationtype=[" + "Probabilities"+ "]");
 
 	// Split channels of processed probability map image
 	run("Split Channels");
@@ -241,7 +241,7 @@ function processorIlastik(original_ID, original_name, roi_file_path, workflow, m
 	rename(original_name);
 	
 
-	// Check if a illastik output exist, load it if so, otherwise run the classification
+	// Check if a ilastik output exist, load it if so, otherwise run the classification
 	output_path = ilastik_output_dir + name + "_probability_map.tif";
 	if (!File.exists(output_path)) {
 		runPixelClassification(model_path, original_name);
@@ -258,11 +258,11 @@ function processorIlastik(original_ID, original_name, roi_file_path, workflow, m
 
 	// Thresholding
 	setAutoThreshold("IsoData dark no-reset");
-	// setThreshold(0.2745, 1000000000000000000000000000000.0000); (for float32 ilastik output)
-	setThreshold(69.9975, 1000000000000000000000000000000.0000); 
+	setThreshold(0.2745, 1000000000000000000000000000000.0000); 
 	setOption("BlackBackground", true);
 	run("Convert to Mask");
 	run("Watershed");
+
 
 	// Open ROI file, handle error if it doesn't exist
 	if (File.exists(roi_file_path)) {
