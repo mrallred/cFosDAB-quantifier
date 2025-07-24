@@ -1,5 +1,7 @@
 # cFosDAB-quantifer
-ImageJ macro workflow kit for counting cells in brightfield IHC images. Developed for cFos DAB stained neural tissue.
+This FIJI macro suite was developed to quantify cFos-DAB-stained positive cells in brightfield images. It counts dark cell nuclei that are set against lighter background tissue. It enables analysis of many Regions of Interest (ROIs) within a single image simultaneously, outputting the results for each sub-region separately. 
+
+Counting can be done automatically with two workflows: using Ilastik and FindMaxima. Additionally, it includes a tool for hand counting images while still collecting info about ROI size. The Ilastik processer utilizes the Ilastik Pixel classification workflow (a Random Forest classifier) to segment the image. Output from Ilastik are further processed and quantified in FIJI.
 
 Made up of three macro scripts:
 1. launch_macro.ijm: Macro run by user to start. Ensures the suite's integrity and runs the main loop to enter into the setup_and_roi macro.
