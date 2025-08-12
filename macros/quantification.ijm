@@ -94,19 +94,9 @@ function runPixelClassification(model, image_name) {
 	// Process With ilastik
 	run("Run Pixel Classification Prediction", "projectfilename=[" + model + "] input=[" + image_name + "] pixelclassificationtype=[" + "Probabilities"+ "]");
 
-	// Split channels of processed probability map image
-	run("Split Channels");
-	channel_IDs = getImageIDs();
-	c2_ID = channel_IDs[3];
+	output_ID = getImageID();
 
-	// Close extra images
-	for (i = 0; i < channel_IDs.length; i++) {
-    	if (channel_IDs[i] != c2_ID) { 
-        	selectImage(channel_IDs[i]);
-        	close();
-    	}
-	 }
-	selectImage(c2_ID);
+	selectImage(output_ID);
 }
 function isOpen(imageID) {
     // Check if an image with given ID is still open
@@ -251,6 +241,16 @@ function processorIlastik(original_ID, original_name, roi_file_path, workflow, m
 		close(original_name);
 	}
 	ilastik_output_ID = getImageID();
+
+	// Close original image
+	open_images = getImageIDs();
+	for (i = 0; i < open_images.length; i++) {
+    	if (open_images[i] != dup_ID && open_images[i] != ilastik_output_ID) { 
+        	selectImage(open_images[i]);
+        	close();
+    	}
+	 }
+	 selectImage(ilastik_output_ID);
 
 	// post processing
 	run("Median...", "radius=4");
@@ -608,11 +608,11 @@ image_list = getFileList(input_image_dir);
 num_images = image_list.length;
 
 // Initialize main dialog/workflow selection
-workflows = newArray(
-    "Process Single Image (FindMaxima)", 
+workflows = newArray( 
     "Process Single Image (Ilastik)", 
+	"Process All Images (Ilastik)", 
+	"Process Single Image (FindMaxima)",
     "Process All Images (FindMaxima)", 
-    "Process All Images (Ilastik)", 
 	"Process Images Manually",
     "Quit Image Processor");
 continue_loop = true;
