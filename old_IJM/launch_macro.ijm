@@ -44,7 +44,8 @@ function concatArrayIntoStr(array){
 
 // sets file directory location of launch macro to set other paths
 plugin_dir = getDirectory("plugins");
-fiji_root = replace(plugin_dir, "plugins" + File.separator, ""); 
+plugin_dir = replace(plugin_dir, "\\", "/");
+fiji_root = replace(plugin_dir, "plugins/", ""); 
 
 MAIN_DIR = plugin_dir + "cell-quantifier-workflows" + File.separator;
 
