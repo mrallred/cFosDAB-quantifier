@@ -1,21 +1,27 @@
 import os
 import csv
 import traceback
+
 from ij import IJ, WindowManager
 from ij.gui import ImageCanvas, ImageWindow
 from ij.plugin.frame import RoiManager
+
+from java.io import File
+from java.nio.file import Files, StandardCopyOption
 
 from javax.swing import (JFrame, JDialog, JMenuBar, JMenu, JMenuItem, JSplitPane,
                          JPanel, JComboBox, JScrollPane, JOptionPane, JTree, JTable,
                          JButton, JLabel, JFileChooser, ListSelectionModel, BorderFactory,
                          JTextField, JList, JCheckBox, DefaultListModel)
-
 from javax.swing.table import AbstractTableModel, DefaultTableModel
 from javax.swing.tree import DefaultMutableTreeNode, DefaultTreeModel
-from java.awt import BorderLayout, FlowLayout, Font, GridLayout, Cursor
-from java.awt.event import WindowAdapter, MouseAdapter, KeyListener
 from javax.swing.event import ListSelectionListener, ListDataListener
 from javax.swing.border import EmptyBorder
+from javax.swing.filechooser import FileNameExtensionFilter
+
+from java.awt import BorderLayout, FlowLayout, Font, GridLayout, Cursor
+from java.awt.event import WindowAdapter, MouseAdapter, KeyListener
+
 
 #==============================================
 # Project structure and file managment
@@ -26,7 +32,9 @@ class ProjectImage(object):
     def __init__(self, filename, project_path):
         self.filename = filename
         self.full_path = os.path.join(project_path, "Images", filename)
-        self.roi_path = os.path.join(project_path, "ROI_Files", self.filename.replace(".tif", "_ROIs.zip"))
+
+        base_name, _ = os.path.splitext(self.filename)
+        self.roi_path = os.path.join(project_path, "ROI_Files", base_name + "_ROIs.zip")
         self.rois = [] # list of dictionaries
         self.status = "New" 
 
@@ -84,8 +92,16 @@ class Project(object):
         for key, path in self.paths.items():
             if not os.path.exists(path):
                 try:
-                    os.makedirs(path)
-                    IJ.log("Created missing project directory: {}".format(path))
+                    # For csv databases
+                    if path.endswith(".csv"):
+                        # headers = ['filename', 'roi_name', 'bregma', 'status']
+                        with open(path, 'w') as csvfile:
+                            writer = csv.writer(csvfile)
+                            # writer.writerow(headers)
+                            IJ.log("Created missing project database: {}".format(path))
+                    else:
+                        os.makedirs(path)
+                        IJ.log("Created missing project directory: {}".format(path))
                 except OSError as e:
                     IJ.log("Error creating directory {}: {}".format(path, e))
 
@@ -129,7 +145,7 @@ class Project(object):
         
         existing_filenames = {img.filename for img in self.images}
         for f in sorted(os.listdir(self.paths['images'])):
-            if f.lower().endswith(('.tif', '.tiff')) and f not in existing_filenames:
+            if f.lower().endswith(('.tif', '.tiff', 'jpg', 'jpeg')) and f not in existing_filenames:
                 new_image = ProjectImage(f, self.root_dir)
                 new_image.status = "Untracked"
                 new_image.populate_rois_from_zip() # try to load existing zip
@@ -246,10 +262,13 @@ class ProjectManagerGUI(WindowAdapter):
         control_panel.add(self.status_label, BorderLayout.CENTER)
         
         button_panel = JPanel(FlowLayout(FlowLayout.RIGHT))
+
+        self.import_button = JButton("Import Images", enabled=False)
         self.select_all_button = JButton("Select All / None")
-        self.select_all_button.addActionListener(self.toggle_select_all_action)
         self.roi_button = JButton("Define/Edit ROIs", enabled=False)
         self.quant_button = JButton("Run Quantification", enabled=False)
+
+        button_panel.add(self.import_button)
         button_panel.add(self.select_all_button)
         button_panel.add(self.roi_button)
         button_panel.add(self.quant_button)
@@ -257,6 +276,8 @@ class ProjectManagerGUI(WindowAdapter):
         control_panel.add(button_panel, BorderLayout.EAST)
         self.frame.add(control_panel, BorderLayout.SOUTH)
 
+        self.import_button.addActionListener(self.import_images_action)
+        self.select_all_button.addActionListener(self.toggle_select_all_action)
         self.roi_button.addActionListener(self.open_roi_editor_action)
         self.quant_button.addActionListener(self.open_quantification_dialog_action)
 
@@ -362,6 +383,51 @@ class ProjectManagerGUI(WindowAdapter):
         
         IJ.showMessage("Quantification ready.", "Ready to process {}".format(len(selected_images)))
 
+    def import_images_action(self, event):
+        """ Opens file chooser to select and copy images into project structure """
+        if not self.project:
+            return
+        
+        chooser = JFileChooser()
+        chooser.setDialogTitle("Select Images to Import")
+        chooser.setMultiSelectionEnabled(True)
+        chooser.setFileFilter(FileNameExtensionFilter("Image Files (tif, tiff, jpg, jpeg)", ["tif","tiff","jpg","jpeg"]))
+
+        if chooser.showOpenDialog(self.frame) == JFileChooser.APPROVE_OPTION:
+            selected_files = chooser.getSelectedFiles()
+            images_dir = self.project.paths['images']
+            newly_added_count = 0
+
+            for source_file in selected_files:
+                source_path = source_file.toPath()
+                dest_file = File(images_dir, source_file.getName())
+                dest_path = dest_file.toPath()
+
+                # Check if file with name already exists
+                if dest_file.exists():
+                    IJ.error("Skipped Import", "{} already exists in the project").format(source_file.getName())
+                    continue
+
+                try:
+                    Files.copy(source_path, dest_path, StandardCopyOption.REPLACE_EXISTING)
+
+                    # Create projectImage object and add it to memory
+                    new_image = ProjectImage(dest_file.getName(), self.project.root_dir)
+                    new_image.status = "Untracked"
+                    self.project.images.append(new_image)
+                    newly_added_count += 1
+
+                except Exception as e:
+                    error_msg ="Failed to import '{}': {}".format(source_file.getName(), e) 
+                    IJ.log(error_msg)
+                    JOptionPane.showMessageDialog(self.frame, error_msg, "Import Error", JOptionPane.ERROR_MESSAGE)
+
+            if newly_added_count > 0:
+                self.status_label.setText("Successfully imported {} new images.".format(newly_added_count))
+                self.update_ui_for_project()
+                self.set_unsaved_changes(True)     
+
+
     def windowClosing(self, event):
         """ Called when user attempts to close window, intercepts and prompts to save changes """
         if self.unsaved_changes:
@@ -391,6 +457,9 @@ class ProjectManagerGUI(WindowAdapter):
         try:
             self.project = Project(project_dir)
             self.update_ui_for_project()
+
+            self.import_button.setEnabled(True)
+
             self.status_label.setText("Sucessfully loaded project: {}".format(self.project.name))
             self.set_unsaved_changes(False)
         except Exception as e:
@@ -805,8 +874,35 @@ class QuantificationDialog(JDialog):
 # Processor Classes
 #==============================================
 
+class QuantificationWorker():
+    """ Processor Classs facilitating image quantification given settings from the dialog """
+    def __init__(self, settings, progress_bar):
+        self.settings = settings
+        self.progress_bar = progress_bar
+    
+    def run_pixel_classification_in_background(self):
+        """ Method to run Ilastik pixel classification, producing probability maps, results, and output images """
+        pixel_classifier = PixelClassificationPrediction(ilastik_project_path)
+        all_results_for_csv = []
+        
+        # Loop through images
+        for image_obj in selected_images:
+            try:
+                # Open OG image headlessly
+                imp_original = IJ.openImage(image_obj.full_path)
+                results_for_this_image = []
+                 
+                # Loop through ROIs for current image
+                for roi in image_obj.rois:
+                    # set ROI to define processing area
+                    imp_original.setRoi(roi)
 
-
+                    # Crop to a small temp img containing only ROI for efficiency
+                    imp_cropped = imp_original.duplicate()
+                    IJ.run(imp_cropped, "Crop", "")
+                    imp_cropped.show()
+            except:
+                continue
 #==============================================
 # Program entry point
 #==============================================
