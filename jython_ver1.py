@@ -1,18 +1,25 @@
 import os
 import csv
 import traceback
+import time
 
 from ij import IJ, WindowManager
-from ij.gui import ImageCanvas, ImageWindow
+from ij.gui import ImageCanvas, ImageWindow, OvalRoi, Overlay
 from ij.plugin.frame import RoiManager
+from ij.measure import ResultsTable, Measurements
+from ij.plugin.filter import ParticleAnalyzer
 
-from java.io import File
-from java.nio.file import Files, StandardCopyOption
+
+from java.io import File, IOException
+from java.nio.file import Files, StandardCopyOption, Paths
+from java.beans import PropertyChangeListener
+from java.lang import Runnable, System
 
 from javax.swing import (JFrame, JDialog, JMenuBar, JMenu, JMenuItem, JSplitPane,
                          JPanel, JComboBox, JScrollPane, JOptionPane, JTree, JTable,
                          JButton, JLabel, JFileChooser, ListSelectionModel, BorderFactory,
-                         JTextField, JList, JCheckBox, DefaultListModel)
+                         JTextField, JList, JCheckBox, DefaultListModel,
+                         SwingWorker, JProgressBar, ProgressMonitor, SwingUtilities)
 from javax.swing.table import AbstractTableModel, DefaultTableModel
 from javax.swing.tree import DefaultMutableTreeNode, DefaultTreeModel
 from javax.swing.event import ListSelectionListener, ListDataListener
@@ -21,7 +28,6 @@ from javax.swing.filechooser import FileNameExtensionFilter
 
 from java.awt import BorderLayout, FlowLayout, Font, GridLayout, Cursor
 from java.awt.event import WindowAdapter, MouseAdapter, KeyListener
-
 
 #==============================================
 # Project structure and file managment
@@ -94,11 +100,19 @@ class Project(object):
                 try:
                     # For csv databases
                     if path.endswith(".csv"):
-                        # headers = ['filename', 'roi_name', 'bregma', 'status']
-                        with open(path, 'w') as csvfile:
-                            writer = csv.writer(csvfile)
-                            # writer.writerow(headers)
-                            IJ.log("Created missing project database: {}".format(path))
+                        headers = []
+                        if key == 'roi_db':
+                            headers = ['filename', 'roi_name', 'bregma', 'status']
+                        elif key == 'image_status_db': 
+                            headers = ['filename', 'status']
+                        elif key == 'results_db':
+                            headers = ['filename', 'roi_name', 'roi_area', 'brema_value', 'cell_count', 'total_cell_area' ]
+
+                        if headers:
+                            with open(path, 'w') as csvfile:
+                                writer = csv.writer(csvfile)
+                                writer.writerow(headers)
+                                IJ.log("Created missing project database: {}".format(path))
                     else:
                         os.makedirs(path)
                         IJ.log("Created missing project directory: {}".format(path))
@@ -112,34 +126,49 @@ class Project(object):
             'rois': os.path.join(self.root_dir, 'ROI_Files'),
             'processed': os.path.join(self.root_dir, 'Processed_Images'),
             'probabilities': os.path.join(self.root_dir, 'Ilastik_Probabilites'),
-            'project_db': os.path.join(self.root_dir, 'Project_DB.csv'),
+            'temp': os.path.join(self.root_dir, 'temp'),
+            'roi_db': os.path.join(self.root_dir, 'Roi_DB.csv'),
+            'image_status_db': os.path.join(self.root_dir, 'Image_Status_DB.csv'),
             'results_db': os.path.join(self.root_dir, 'Results_DB.csv')
         }
 
     def _load_project_db(self):
-        """ Loads and parses project_db.csv """
-        db_path = self.paths['project_db']
-        if not os.path.exists(db_path):
-            # create dummy file for now
-            with open(db_path, 'w') as f:
-                f.write("filename,roi_name,bregma,status\n")
-            return
-        
-        images_map = {} # map to group ROIs by filename
-        with open(db_path, 'r') as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                filename = row['filename']
-                if filename not in images_map:
-                    images_map[filename] = ProjectImage(filename, self.root_dir)
+        """
+        Loads and parses both databases and immediately tries to populate
+        ROI details from zip files if they are missing from the DB.
+        """
+        images_map = {}
 
-                # add ROI info to correct ProjectImage object
-                images_map[filename].add_roi(row)
+        # Load Image Status DB
+        status_db_path = self.paths['image_status_db']
+        if os.path.exists(status_db_path):
+            with open(status_db_path, 'r') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    filename = row['filename']
+                    if filename not in images_map:
+                        images_map[filename] = ProjectImage(filename, self.root_dir)
+                    images_map[filename].status = row.get('status', 'New')
+
+        # Load ROI DB
+        roi_db_path = self.paths['roi_db']
+        if os.path.exists(roi_db_path):
+            with open(roi_db_path, 'r') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    filename = row['filename']
+                    if filename not in images_map:
+                        images_map[filename] = ProjectImage(filename, self.root_dir)
+                    images_map[filename].add_roi(row)
+
+        # Loop through all loaded images and populate from zip if needed 
+        for image in images_map.values():
+            image.populate_rois_from_zip()
 
         self.images = sorted(images_map.values(), key=lambda img: img.filename)
 
     def _scan_for_new_images(self):
-        """ scans images folder for any files not added to the DB """
+        """ Scans images folder for any files not already loaded from the DBs. """
         if not os.path.isdir(self.paths['images']):
             return
         
@@ -148,12 +177,18 @@ class Project(object):
             if f.lower().endswith(('.tif', '.tiff', 'jpg', 'jpeg')) and f not in existing_filenames:
                 new_image = ProjectImage(f, self.root_dir)
                 new_image.status = "Untracked"
-                new_image.populate_rois_from_zip() # try to load existing zip
+                new_image.populate_rois_from_zip() # new images
                 self.images.append(new_image)
 
     def sync_project_db(self):
-        """ Rewrites project_DB.csv file from in memory project state. """
-        db_path = self.paths['project_db']
+        """ Master save function that syncs both databases. """
+        roi_success = self._sync_roi_db()
+        status_success = self._sync_image_status_db()
+        return roi_success and status_success
+
+    def _sync_roi_db(self):
+        """ Rewrites the Roi_DB.csv (ROI data) from memory. """
+        db_path = self.paths['roi_db']
         headers = ['filename', 'roi_name', 'bregma', 'status']
         try:
             with open(db_path, 'wb') as csvfile:
@@ -161,7 +196,7 @@ class Project(object):
                 writer.writeheader()
                 for image in self.images:
                     if not image.rois:
-                        continue
+                        continue # Skip images with no ROIs
                     for roi_data in image.rois:
                         row = {
                             'filename': image.filename,
@@ -170,14 +205,28 @@ class Project(object):
                             'status': roi_data.get('status', 'Pending')
                         }
                         writer.writerow(row)
-            IJ.log("Sucessfully synced Project_DB.csv")
             return True
         except IOError as e:
-            IJ.log("Error syncing Project_DB.csv: {}".format(e))
+            IJ.log("Error syncing ROI DB: {}".format(e))
+            return False
+
+    def _sync_image_status_db(self):
+        """ Rewrites the Image_Status_DB.csv from memory. """
+        db_path = self.paths['image_status_db']
+        headers = ['filename', 'status']
+        try:
+            with open(db_path, 'wb') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=headers)
+                writer.writeheader()
+                for image in self.images:
+                    writer.writerow({'filename': image.filename, 'status': image.status})
+            return True
+        except IOError as e:
+            IJ.log("Error syncing Image Status DB: {}".format(e))
             return False
 
 #==============================================
-# GUI Classes
+# Main GUI Classes
 #==============================================
 
 class ProjectManagerGUI(WindowAdapter):
@@ -186,7 +235,7 @@ class ProjectManagerGUI(WindowAdapter):
         self.project = None
         self.unsaved_changes = False
         self.save_proj_item = None
-
+        
         self.frame = JFrame("Project Manager")
         self.frame.setSize(900, 700)
         self.frame.setLayout(BorderLayout())
@@ -367,21 +416,20 @@ class ProjectManagerGUI(WindowAdapter):
             editor.show()
 
     def open_quantification_dialog_action(self, event):
-        """ Gathers selectd images and opens the quantification settings dialog """
+        """ Gathers selected images and opens the quantification settings dialog. """
         selected_rows = self.image_table.getSelectedRows()
-        if not selected_rows:
-            return
-        
-        # Create list of ProjectImage objects that were selected
+        if not selected_rows: return
+
         selected_images = [self.project.images[row] for row in selected_rows]
 
         quant_dialog = QuantificationDialog(self.frame, selected_images)
-        selections = quant_dialog.show_dialog()
+        settings = quant_dialog.show_dialog()
 
-        # if selections:
-        #   # Run QuantificationWorker here
-        
-        IJ.showMessage("Quantification ready.", "Ready to process {}".format(len(selected_images)))
+        if settings:
+            progress_dialog = ProgressDialog(self.frame, "Processing images...", 100)
+            worker = QuantificationWorker(self.project, settings, progress_dialog)
+            progress_dialog.setVisible(True)
+            worker.execute()
 
     def import_images_action(self, event):
         """ Opens file chooser to select and copy images into project structure """
@@ -569,12 +617,15 @@ class ROIEditor(WindowAdapter):
         create_button = JButton("Create New From Selection", actionPerformed=self._create_new_roi)
         update_button = JButton("Update Selected ROI", actionPerformed=self._update_selected_roi)
         delete_button = JButton("Delete Selected ROI", actionPerformed=self._delete_selected_roi)
+        finalize_button = JButton("Mark Image Ready For Processing", actionPerformed=self._finalize_image)
         save_button = JButton("Save & Close", actionPerformed=self._save_and_close)
+
 
         button_panel.add(create_button)
         button_panel.add(update_button)
-        button_panel.add(save_button)
         button_panel.add(delete_button)
+        button_panel.add(finalize_button)
+        button_panel.add(save_button)
 
         # Controls
         south_contols = JPanel(BorderLayout())
@@ -656,7 +707,7 @@ class ROIEditor(WindowAdapter):
             'status': 'Defined'
         })
 
-        self.update_roi_list_from_manager()
+        self.roi_list_model.addElement(new_name)
         self.roi_list.setSelectedValue(new_name, True)
 
     def _is_name_unique(self, name_to_check, ignore_index=-1):
@@ -677,6 +728,8 @@ class ROIEditor(WindowAdapter):
 
         new_name = self.roi_name_field.getText()
         new_bregma = self.bregma_field.getText()
+
+        original_index = self.roi_list.getSelectedIndex()
 
         # Update ROI name in the ROI Manager
         self.rm.runCommand("Rename", new_name)
@@ -701,8 +754,8 @@ class ROIEditor(WindowAdapter):
                 'status': 'Defined'
             })
             
-        self.update_roi_list_from_manager()
-        IJ.log("Updated ROI: " + new_name)
+        if original_index != -1:
+            self.roi_list_model.setElementAt(new_name, original_index)
 
     def _delete_selected_roi(self, event):
         selected_index = self.roi_list.getSelectedIndex()
@@ -720,10 +773,25 @@ class ROIEditor(WindowAdapter):
         # delete dictionary from data list
         self.image_obj.rois = [roi for roi in self.image_obj.rois if roi.get('roi_name') != roi_name_to_delete]
 
+        if selected_index != -1:
+            self.roi_list_model.removeElementAt(selected_index)
+
         # refresh visible list from update manager & clear text field
-        self.update_roi_list_from_manager()
         self.roi_name_field.setText("")
         self.bregma_field.setText("")
+
+    def _finalize_image(self, event):
+        self.image_obj.status = "Finalized"
+
+        # Now we call the specific method to save only the image statuses
+        if self.project._sync_image_status_db():
+            IJ.log("Image '{}' status updated and saved.".format(self.image_obj.filename))
+        else:
+            IJ.error("Save Failed", "Could not save the image status database. See Log.")
+            return
+
+        self.parent_gui.refresh_project_and_ui()
+        self.cleanup()
 
 
     def _save_and_close(self, event=None):
@@ -763,7 +831,7 @@ class ROIEditor(WindowAdapter):
 
         # Now, perform the final save operations with the fully consistent data.
         self.rm.runCommand("Save", self.image_obj.roi_path)
-        self.project.sync_project_db()
+        self.project._sync_roi_db()
 
         self.parent_gui.refresh_project_and_ui()
         self.cleanup()
@@ -808,13 +876,22 @@ class EditableROIsTableModel(AbstractTableModel):
         # Updates data in projectImage directly
         self.fireTableCellUpdated(rowIndex, columnIndex)
 
+
+#==============================================
+# Quantification dialog class
+#==============================================
+
 class QuantificationDialog(JDialog):
-    """ modal dialog to configure setting for a batch quantification process. Returns select settings to be passed to the worker """
+    """
+    modal dialog to configure setting for a batch quantification process.
+    Returns selected settings to be passed to the worker class.
+    """
     def __init__(self, parent_frame, selected_images):
         super(QuantificationDialog, self).__init__(parent_frame, "Quantification Setting", True)
 
         self.selected_images = selected_images
-        self.setting = None
+        self.settings = None
+        self.available_models = self._get_models()
 
         # Main panel
         main_panel = JPanel(BorderLayout(10,10))
@@ -830,13 +907,16 @@ class QuantificationDialog(JDialog):
         settings_panel = JPanel(GridLayout(0,2,10,10))
         settings_panel.setBorder(BorderFactory.createTitledBorder("Processing Options"))
 
-        # Drop down menu for processing method
-        settings_panel.add(JLabel("Processing Method:"))
-        processing_methods = ["Ilastik Pixel Classifcation", "Option 2"]
-        self.method_combo = JComboBox(processing_methods)
-        settings_panel.add(self.method_combo)
+        # workflow selection
+        workflows = ["cFosDAB+ Detection (Generic Model)", "cFosDAB+ Detection (region specific model)"]
+        settings_panel.add(JLabel("Choose Your Quantification Type: "))
+        self.workflow_combo = JComboBox(workflows)
+        settings_panel.add(self.workflow_combo)
 
-        # MORE SETTINGS HERE
+        # Verbose images or no
+        settings_panel.add(JLabel("Display Options: "))
+        self.show_images_checkbox = JCheckBox("Show images during processing", False)
+        settings_panel.add(self.show_images_checkbox)
 
         main_panel.add(settings_panel, BorderLayout.CENTER)
 
@@ -852,11 +932,18 @@ class QuantificationDialog(JDialog):
 
     def _run_action(self, event):
         """ Gathers settings into dictionary and closes dialog """
-        self.settings = {
-            'images': self.selected_images,
-            'method': self.method_combo.getSelectedItem()
-            # OTHER SETTINGS HERE
-            }
+        selected_workflow = self.workflow_combo.getSelectedItem()
+
+        if selected_workflow == "cFosDAB+ Detection (Generic Model)": 
+            self.settings = {
+                'images': self.selected_images,
+                'pixel_classifier': self.available_models['PIXEL_cFosDAB_TiffIO_Generic'],
+                'object_classifier': self.available_models['OBJECT_cFosDAB_TiffIO_Generic'],  
+                'show_images': self.show_images_checkbox.isSelected()
+                }
+        elif selected_workflow == "cFosDAB+ Detection (region specific model)":
+            IJ.error("NOT IMPLEMENTED", "Havnent made this yet. use the generic model.")
+        
         self.dispose()
 
     def _cancel_action(self,event):
@@ -870,45 +957,387 @@ class QuantificationDialog(JDialog):
         self.setVisible(True)
         return self.settings
     
+    def _get_models(self):
+        """
+        Finds models in a dedicated folder inside Fiji's 'lib' directory.
+        This works by locating the core ImageJ .jar file
+        to determine the Fiji root directory, regardless of how
+        the application was launched.
+        """
+        from java.net import URLDecoder
+        from java.lang import System
+
+        MODELS_FOLDER_NAME = "cell-quantifier-toolkit-models"
+        models = {}
+        
+        try:
+            class_loader = IJ.getClassLoader()
+            if class_loader is None:
+                raise IOError("Could not get ImageJ ClassLoader.")
+
+            resource_url = class_loader.getResource("IJ_Props.txt")
+            if resource_url is None:
+                raise IOError("Could not find core resource 'IJ_Props.txt'. Is Fiji installed correctly?")
+
+            url_str = URLDecoder.decode(resource_url.toString(), "UTF-8")
+            path_part = url_str.split("!")[0].replace("jar:file:", "")
+
+            if System.getProperty("os.name").lower().startswith("windows") and path_part.startswith("/"):
+                path_part = path_part[1:]
+
+            jar_file = File(path_part)
+            fiji_root_file = jar_file.getParentFile().getParentFile()
+            fiji_root = fiji_root_file.getAbsolutePath()
+           
+            models_dir = os.path.join(fiji_root, "lib", MODELS_FOLDER_NAME)
+
+            if os.path.isdir(models_dir):
+                for f in os.listdir(models_dir):
+                    if f.lower().endswith('.ilp'):
+                        display_name = os.path.splitext(f)[0]
+                        full_path = os.path.join(models_dir, f)
+                        models[display_name] = full_path
+            else:
+                IJ.log("Model directory not found. Please create it at: " + models_dir)
+
+        except Exception as e:
+            IJ.log("Error discovering models: " + str(e))
+            IJ.log(traceback.format_exc())
+
+        return models
+
+class ProgressDialog(JDialog):
+    """ A simple, non-modal dialog to display a progress bar. """
+    def __init__(self, parent_frame, title, max_value):
+        super(ProgressDialog, self).__init__(parent_frame, title, False)
+        self.progress_bar = JProgressBar(0, max_value)
+        self.progress_bar.setStringPainted(True)
+        self.add(self.progress_bar)
+        self.pack()
+        self.setSize(400, 80)
+        self.setLocationRelativeTo(parent_frame)
+
 #==============================================
 # Processor Classes
 #==============================================
 
-class QuantificationWorker():
-    """ Processor Classs facilitating image quantification given settings from the dialog """
-    def __init__(self, settings, progress_bar):
+class QuantificationWorker(SwingWorker):
+    """ Processor Classs facilitating image quantification on a background thread given settings from the dialog """
+    def __init__(self, project, settings, progress_dialog):
+        super(QuantificationWorker, self).__init__()
+        self.project = project
         self.settings = settings
-        self.progress_bar = progress_bar
-    
-    def run_pixel_classification_in_background(self):
-        """ Method to run Ilastik pixel classification, producing probability maps, results, and output images """
-        pixel_classifier = PixelClassificationPrediction(ilastik_project_path)
-        all_results_for_csv = []
-        
-        # Loop through images
-        for image_obj in selected_images:
-            try:
-                # Open OG image headlessly
-                imp_original = IJ.openImage(image_obj.full_path)
-                results_for_this_image = []
-                 
-                # Loop through ROIs for current image
-                for roi in image_obj.rois:
-                    # set ROI to define processing area
-                    imp_original.setRoi(roi)
+        self.progress_dialog = progress_dialog
+        self.all_results = []
 
-                    # Crop to a small temp img containing only ROI for efficiency
+    def doInBackground(self):
+        """ This method uses a filesystem bridge to run the pixelclassifications on a background thread """
+
+        class UpdateProgressBarTask(Runnable):
+            def __init__(self, dialog, value):
+                self.dialog = dialog
+                self.value = value
+            def run(self):
+                self.dialog.progress_bar.setValue(self.value)
+
+        images_to_process = self.settings['images']
+        total_rois = sum(len(img.rois) for img in images_to_process)
+        if total_rois == 0: 
+            return "No ROIs to process."
+        roi_counter = 0
+
+        for image_obj in images_to_process:
+            if self.isCancelled(): 
+                break
+            
+            imp_original = IJ.openImage(image_obj.full_path)
+            imp_original_name = image_obj.filename
+            if not imp_original:
+                raise Exception("ERROR: Failed to open original image: " + image_obj.full_path)
+            
+            if self.settings.get('show_images', True):
+                imp_original.show()
+            else:
+                imp_original.close()
+
+
+            # This inner loop defines 'roi_data' for each ROI in the current image
+            for roi_data in image_obj.rois:
+                if self.isCancelled(): 
+                    break
+                
+                roi_name = roi_data['roi_name']
+                temp_cropped_path = None # Define here for the finally block
+                
+                try:
+                    rm = RoiManager(True)
+                    rm.open(image_obj.roi_path)
+                    roi = rm.getRoi(rm.getIndex(roi_name))
+                    rm.close()
+                    if not roi:
+                        raise Exception("Could not find ROI '" + roi_name + "' in the ROI file.")
+
+                    # Get bounding box coordinates
+                    roi_x = roi.getBounds().x
+                    roi_y = roi.getBounds().y
+
+                    roi_for_analysis = roi.clone()
+
                     imp_cropped = imp_original.duplicate()
+                    imp_cropped.setRoi(roi_for_analysis)
                     IJ.run(imp_cropped, "Crop", "")
-                    imp_cropped.show()
-            except:
-                continue
+                    
+                    # set up the file paths we need and save a temp version of the cropped image
+                    base_name = "{}_{}".format(os.path.splitext(image_obj.filename)[0], roi_data['roi_name'])
+                    temp_cropped_path = os.path.join(self.project.paths['temp'], base_name + "_cropped.tif")
+                    prob_map_path = os.path.join(self.project.paths['probabilities'], base_name)
+                    IJ.saveAs(imp_cropped, "Tiff", temp_cropped_path)
+
+                    if self.settings.get('show_images', True):
+                        imp_cropped.show()
+                    else:
+                        imp_cropped.close()
+
+                    # Run ilastik classification 
+                    result_imp = self._run_ilastik_classification(roi_for_analysis, temp_cropped_path, imp_original_name, prob_map_path)
+
+                    # Process and analyze in fiji
+                    analysis = self._analyze_results(result_imp, roi_for_analysis, roi_x, roi_y)
+
+                    single_roi_result = {
+                        'filename': image_obj.filename,
+                        'roi_name': roi_data['roi_name'],
+                        'roi_area': roi.getStatistics().area, # Get area of the main analysis ROI
+                        'brema_value': roi_data.get('bregma', 'N/A'),
+                        'cell_count': analysis['count'],
+                        'total_cell_area': analysis['total area']
+                    }
+                    # Add this result to the master list that will be saved later
+                    self.all_results.append(single_roi_result)
+
+                    particle_outlines = analysis.get('outlines', [])
+
+                    if particle_outlines:
+                        outlines_to_add = particle_outlines + [roi]
+
+                        overlay = imp_original.getOverlay()
+                        if overlay is None:
+                            overlay = Overlay()
+                            imp_original.setOverlay(overlay)
+
+                        for outline_roi in outlines_to_add:
+                            overlay.add(outline_roi)
+                        imp_original.updateAndDraw()   
+
+                        if self.settings.get('show_images', True):
+                            imp_original.show()
+                        else:
+                            imp_original.close()
+
+                    else:
+                        print("fail")
+
+                except Exception as e:
+                    IJ.log("ERROR processing ROI '{}' in '{}': {}".format(roi_name, image_obj.filename, e))
+                    continue 
+
+                finally:
+                    if temp_cropped_path and os.path.exists(temp_cropped_path):
+                        try:
+                            os.remove(temp_cropped_path)
+                        except Exception as ex:
+                            IJ.log("Warning: Could not delete temporary file " + temp_cropped_path)
+                    
+                    roi_counter += 1
+                    progress = int(100.0 * roi_counter / total_rois)
+                    update_task = UpdateProgressBarTask(self.progress_dialog, progress)
+                    SwingUtilities.invokeLater(update_task)
+            
+            if imp_original:
+                export_path = os.path.join(self.project.paths['processed'], os.path.splitext(imp_original_name)[0] + "_processed.tiff")
+                
+                image_to_save = None
+                
+                # Check if an overlay exists to be flattened
+                if imp_original.getOverlay():
+                    IJ.log("Flattening overlay for " + imp_original_name)
+                    # flatten() creates a NEW image with the overlay burned in.
+                    image_to_save = imp_original.flatten()
+                else:
+                    # No overlay, so we will just save the original.
+                    image_to_save = imp_original
+
+                # Save the designated image (either the new flattened one or the original).
+                IJ.saveAs(image_to_save, "Tiff", export_path)
+
+                # Manage windows based on user settings.
+                if self.settings.get('show_images', True):
+                    image_to_save.show() # Show the final result.
+                    # If we created a new flattened image, close the old one with the interactive overlay.
+                    if image_to_save is not imp_original:
+                        imp_original.close()
+                else:
+                    # If not showing images, clean up everything.
+                    image_to_save.close()
+                    if image_to_save is not imp_original:
+                        imp_original.close()
+                    
+        return "Batch processing complete. {} ROIs processed.".format(roi_counter)
+    
+    def _run_ilastik_classification(self, roi, temp_cropped_path, img_name, prob_map_path):
+        """ Segment input image using two step ilastik workflow. Generate proability maps with pixel classification workflow,
+            save those results, and then generate object maps with object classifcation workflow."""
+        try:
+            pixel_classifier = self.settings['pixel_classifier']
+            object_classifer = self.settings['object_classifier']
+
+            pixel_prob_path = prob_map_path + "_probabilities.tif"
+            object_prob_path = prob_map_path + "_objects.tif"
+            
+            # Run pixel classification
+            if os.path.exists(object_prob_path):
+                result_imp = IJ.openImage(object_prob_path)
+                if self.settings.get('show_images', True):
+                    result_imp.show()
+
+            
+            elif os.path.exists(pixel_prob_path):
+                result_imp = IJ.openImage(pixel_prob_path)
+                if self.settings.get('show_images', True):
+                    result_imp.show()
+
+                # Run Object classification with generated probability map
+                object_macro_cmd = 'run("Run Object Classification Prediction", "projectfilename=[{}] rawinputimage=[{}] inputproborsegimage=[{}] secondinputtype=Probabilities ");'.format(object_classifer,temp_cropped_path, pixel_prob_path)
+                IJ.runMacro(object_macro_cmd)
+
+                result_imp = IJ.getImage()
+                if result_imp:
+                    IJ.saveAs(result_imp, "Tiff", object_prob_path)
+                    if self.settings.get('show_images', True):
+                        result_imp.show()
+                else:
+                    raise Exception("No probability map output from ilastik object classifier.")
+
+            else:
+                pixel_macro_cmd = 'run("Run Pixel Classification Prediction", "projectfilename=[{}] inputimage=[{}] pixelclassificationtype=Probabilities");'.format(pixel_classifier, temp_cropped_path)
+                IJ.runMacro(pixel_macro_cmd)
+
+                result_imp = IJ.getImage()
+                if result_imp:
+                    IJ.saveAs(result_imp, "Tiff", pixel_prob_path)
+                    if self.settings.get('show_images', True):
+                        result_imp.show()
+                else:
+                    raise Exception("No probability map output from ilastik pixel classifier.")
+            
+                # Run Object classification with generated probability map
+                object_macro_cmd = 'run("Run Object Classification Prediction", "projectfilename=[{}] rawinputimage=[{}] inputproborsegimage=[{}] secondinputtype=Probabilities ");'.format(object_classifer,temp_cropped_path, pixel_prob_path)
+                IJ.runMacro(object_macro_cmd)
+
+                result_imp = IJ.getImage()
+                if result_imp:
+                    IJ.saveAs(result_imp, "Tiff", object_prob_path)
+                    if self.settings.get('show_images', True):
+                        result_imp.show()
+                else:
+                    raise Exception("No probability map output from ilastik object classifier.")
+
+            return result_imp
+            
+        except Exception as e:
+            IJ.log("ilastik processing failed: " + str(e))
+            raise e
+
+    def _analyze_results(self, result_imp, roi, offset_x, offset_y):
+        """ final processing and analysis of ilastik output in fiji. creates selection of points in roi manager. """
+        IJ.run("Clear Results")
+
+        # Threshold to select dark and light cells
+        IJ.setThreshold(result_imp, 1, 3)
+        IJ.run(result_imp, "Convert to Mask", "")
+
+        # watershed to split any cells that were merged
+        IJ.run(result_imp, "Watershed", "")
+        
+        #select only roi
+        rm = RoiManager(True)
+
+        # Set up and run the ParticleAnalyzer programmatically
+        rt = ResultsTable()
+        options = ParticleAnalyzer.SHOW_OUTLINES | ParticleAnalyzer.EXCLUDE_EDGE_PARTICLES
+        measurements = Measurements.AREA | Measurements.CENTER_OF_MASS 
+
+        # Instantiate the analyzer
+        pa = ParticleAnalyzer(options, measurements, rt, 0, float('inf'), 0.0, 1.0)
+        pa.setRoiManager(rm)
+
+        roi_clone_for_analysis = roi.clone()
+        roi_clone_for_analysis.setLocation(0, 0) # Move the clone to the top-left.
+        result_imp.setRoi(roi_clone_for_analysis)
+
+        # Run analyze particles
+        args = "size=0-Infinity circularity=0.00-1.00 show=Nothing clear add"
+        IJ.run(result_imp, "Analyze Particles...", args)
+
+        # get stats
+        rt = ResultsTable.getResultsTable()
+        count = rt.getCounter()
+        total_area = 0
+        area_col = rt.getColumn(rt.getColumnIndex("Area"))
+        if area_col:
+            total_area = sum(area_col)
+
+        # Get particle oulines
+        particle_outlines_relative = rm.getRoisAsArray()
+        rm.reset()
+
+        if particle_outlines_relative is None:
+            particle_outlines_relative = []
+
+        # translate outlines to correct position
+        particle_outlines_absolute = []
+        for outline in particle_outlines_relative:
+            # Get current location and set the new, offset location
+            current_bounds = outline.getBounds()
+            outline.setLocation(current_bounds.x + offset_x, current_bounds.y + offset_y)
+            particle_outlines_absolute.append(outline)
+
+        analysis = {
+            'count': count,
+            'total area': total_area,
+            'outlines': particle_outlines_absolute
+        }
+        return analysis
+    
+    def done(self):
+        """ Runs on GUI thread after background work is finished. """
+        try:
+            # Save all collected results to the database
+            if self.all_results:
+                results_db_path = self.project.paths['results_db']
+                headers = ['filename', 'roi_name', 'roi_area', 'brema_value', 'cell_count', 'total_cell_area' ]
+                file_exists = os.path.isfile(results_db_path)
+                with open(results_db_path, 'ab') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=headers)
+                    if not file_exists or os.path.getsize(results_db_path) == 0: 
+                        writer.writeheader()
+                    writer.writerows(self.all_results)
+            
+            # Show final status message
+            final_message = self.get()
+            JOptionPane.showMessageDialog(self.progress_dialog, final_message, "Status", JOptionPane.INFORMATION_MESSAGE)
+        except Exception as e:
+            IJ.log(traceback.format_exc())
+            JOptionPane.showMessageDialog(self.progress_dialog, "An error occurred during processing:\n" + str(e), "Error", JOptionPane.ERROR_MESSAGE)
+        finally:
+            self.progress_dialog.dispose()
+
+
+
 #==============================================
 # Program entry point
 #==============================================
 if __name__ == '__main__':
-    from javax.swing import SwingUtilities
-
     def create_and_show_gui():
         gui = ProjectManagerGUI()
         gui.show()
